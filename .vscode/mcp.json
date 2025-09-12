@@ -1,0 +1,9 @@
+{
+	"servers": {
+		"moleculer-mcp": {
+			"url": "http://localhost:3300/mcp",
+			"type": "http"
+		}
+	},
+	"inputs": []
+}

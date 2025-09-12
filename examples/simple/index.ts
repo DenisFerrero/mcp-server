@@ -6,28 +6,19 @@
  */
 
 import { ServiceBroker } from "moleculer";
+import ApiGateway from "moleculer-web";
+import { McpServerMixin } from "../../src/index.js";
 
-import { inspect } from "node:util";
 import process from "node:process";
-import _ from "lodash";
 
 // Create broker
-const broker = new ServiceBroker({
-	logger: {
-		type: "Console",
-		options: {
-			formatter: "short",
-			level: {
-				MCPSERVER: "debug",
-				"*": "info"
-			},
-			objectPrinter: obj =>
-				inspect(obj, {
-					breakLength: 50,
-					colors: true,
-					depth: 3
-				})
-		}
+const broker = new ServiceBroker();
+
+broker.createService({
+	name: "api",
+	mixins: [ApiGateway, McpServerMixin()],
+	settings: {
+		port: 3300
 	}
 });
 
