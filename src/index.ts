@@ -168,7 +168,9 @@ export function McpServerMixin(
 								return; // Already handled
 							} else {
 								// Invalid request - no session ID or not initialization request
-								res.status(400).json({
+								this.logger.warn("Invalid MCP request:", req.headers);
+								res.statusCode = 400;
+								await this.sendResponse(req, res, 400, {
 									jsonrpc: "2.0",
 									error: {
 										code: -32000,
@@ -185,7 +187,8 @@ export function McpServerMixin(
 						} catch (error) {
 							this.logger.error("Error handling MCP request:", error);
 							if (!res.headersSent) {
-								res.status(500).json({
+								res.statusCode = 500;
+								await this.sendResponse(req, res, {
 									jsonrpc: "2.0",
 									error: {
 										code: -32603,
@@ -202,7 +205,8 @@ export function McpServerMixin(
 						this.logger.info("Received MCP GET request");
 						const sessionId = req.headers["mcp-session-id"] as string | undefined;
 						if (!sessionId || !this.transports.has(sessionId)) {
-							res.status(400).json({
+							res.statusCode = 400;
+							await this.sendResponse(req, res, {
 								jsonrpc: "2.0",
 								error: {
 									code: -32000,
@@ -232,7 +236,8 @@ export function McpServerMixin(
 					async "DELETE /"(req, res) {
 						const sessionId = req.headers["mcp-session-id"] as string | undefined;
 						if (!sessionId || !this.transports.has(sessionId)) {
-							res.status(400).json({
+							res.statusCode = 400;
+							await this.sendResponse(req, res, {
 								jsonrpc: "2.0",
 								error: {
 									code: -32000,
@@ -253,7 +258,8 @@ export function McpServerMixin(
 						} catch (error) {
 							this.logger.error("Error handling session termination:", error);
 							if (!res.headersSent) {
-								res.status(500).json({
+								res.statusCode = 500;
+								await this.sendResponse(req, res, {
 									jsonrpc: "2.0",
 									error: {
 										code: -32603,
