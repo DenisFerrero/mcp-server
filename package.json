@@ -1,0 +1,81 @@
+{
+	"name": "@moleculer/mcp-server",
+	"version": "0.0.0",
+	"description": "Moleculer MCP Server",
+	"type": "module",
+	"main": "./dist/cjs/index.js",
+	"module": "./dist/esm/index.js",
+	"types": "./dist/types/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/types/index.d.ts",
+			"require": "./dist/cjs/index.js",
+			"import": "./dist/esm/index.js",
+			"default": "./src/index.ts"
+		}
+	},
+	"files": [
+		"README.md",
+		"LICENSE",
+		"dist"
+	],
+	"scripts": {
+		"dev": "nodemon --inspect examples/index.ts",
+		"ci": "vitest --watch",
+		"test": "vitest --run --coverage",
+		"deps": "ncu -i && npm audit fix",
+		"ci-update-deps": "ncu -u",
+		"lint": "eslint --ext=.ts src examples test",
+		"check": "tsc --noEmit true",
+		"prebuild": "rimraf dist",
+		"build": "tsc -b tsconfig.cjs.json tsconfig.esm.json tsconfig.types.json",
+		"postbuild": "echo {\"type\": \"commonjs\"} > dist/cjs/package.json && echo {\"type\": \"module\"} > dist/esm/package.json",
+		"prepack": "npm run build",
+		"release": "npm publish --access public && git push --tags",
+		"postrelease": "git push origin && git push origin -f --tags"
+	},
+	"keywords": [
+		"mcp-server",
+		"moleculer",
+		"microservice"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/moleculerjs/mcp-server.git"
+	},
+	"author": "MoleculerJS",
+	"license": "MIT",
+	"peerDependencies": {
+		"moleculer": "^0.14.12 || ^0.15.0-0"
+	},
+	"dependencies": {
+		"lodash": "^4.17.21"
+	},
+	"devDependencies": {
+		"@eslint/js": "^9.32.0",
+		"@types/lodash": "^4.17.20",
+		"@types/node": "^24.1.0",
+		"@vitest/coverage-v8": "^3.2.4",
+		"eslint": "^9.32.0",
+		"eslint-config-prettier": "^10.1.8",
+		"eslint-plugin-node": "^11.1.0",
+		"eslint-plugin-prettier": "^5.5.3",
+		"eslint-plugin-promise": "^7.2.1",
+		"eslint-plugin-security": "^3.0.1",
+		"moleculer": "github:moleculerjs/moleculer#next",
+		"moleculer-repl": "^0.7.4",
+		"moleculer-web": "github:moleculerjs/moleculer-web#next",
+		"nodemon": "^3.1.10",
+		"npm-check-updates": "^18.0.2",
+		"prettier": "^3.6.2",
+		"rimraf": "^6.0.1",
+		"tsup": "^8.5.0",
+		"tsx": "^4.20.3",
+		"typescript": "^5.9.2",
+		"typescript-eslint": "^8.38.0",
+		"vitest": "^3.2.4"
+	},
+	"engines": {
+		"node": ">= 20.x.x"
+	}
+}
