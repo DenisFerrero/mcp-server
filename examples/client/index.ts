@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 const mcp = new Client(
 	{
@@ -13,9 +14,7 @@ const mcp = new Client(
 	}
 );
 
-const transport = new StdioClientTransport({
-	command: "npm run start"
-});
+const transport = new StreamableHTTPClientTransport(new URL("http://localhost:3300/mcp"));
 
 async function main() {
 	await mcp.connect(transport);

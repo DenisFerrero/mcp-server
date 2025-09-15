@@ -23,7 +23,7 @@
 		"dev": "set DANGEROUSLY_OMIT_AUTH=true && nodemon --inspect examples/index.ts",
 		"start": "tsx src/index.ts",
 		"inspect": "set DANGEROUSLY_OMIT_AUTH=true && npx @modelcontextprotocol/inspector tsx ./src/index.ts",
-    "client": "tsx src/client.ts",
+    "client": "tsx examples/client/index.ts",
 		"ci": "vitest --watch",
 		"test": "vitest --run --coverage",
 		"deps": "ncu -i && npm audit fix",

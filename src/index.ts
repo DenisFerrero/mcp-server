@@ -276,7 +276,7 @@ export function McpServerMixin(
 				mappingPolicy: "restrict",
 
 				bodyParsers: {
-					json: true
+					json: false // The mcp server will read the raw body itself
 				}
 			});
 
