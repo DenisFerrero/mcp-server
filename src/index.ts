@@ -30,6 +30,10 @@ export function McpServerMixin(
 	});
 
 	function createServer(broker) {
+		const logger = broker.getLogger("MCP");
+
+		logger.info("Creating MCP server...");
+
 		const server = new McpServer(
 			{
 				name: "Moleculer MCP Server",
@@ -53,7 +57,7 @@ export function McpServerMixin(
 				mimeType: "application/json"
 			},
 			async uri => {
-				// console.log("Fetching Moleculer actions...", uri);
+				logger.info("Fetching Moleculer actions...", uri);
 				return {
 					contents: [
 						{
@@ -77,7 +81,7 @@ export function McpServerMixin(
 				mimeType: "application/json"
 			},
 			async (uri, params: { actionName: string }) => {
-				// console.log("Fetching Moleculer action details...", uri);
+				logger.info("Fetching Moleculer action details...", uri);
 				return {
 					contents: [
 						{
@@ -87,6 +91,76 @@ export function McpServerMixin(
 								name: params.actionName,
 								params: { name: { type: "string" } }
 							})
+						}
+					]
+				};
+			}
+		);
+
+		server.tool(
+			"moleculer_list_nodes",
+			"List all Moleculer nodes",
+			{
+				title: "List Moleculer nodes",
+				readOnlyHint: true,
+				destructiveHint: false,
+				idempotentHint: true,
+				openWorldHint: false
+			},
+			async params => {
+				logger.info("Listing Moleculer nodes...", params);
+				const nodes = broker.registry.getNodeList({
+					withServices: false,
+					onlyAvailable: false
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text:
+								nodes
+									.map(
+										a =>
+											`NodeID: ${a.id}, Hostname: ${a.hostname}, Available: ${a.available}, Local: ${a.local}`
+									)
+									.join("\n") || "No nodes found"
+						}
+					]
+				};
+			}
+		);
+
+		server.tool(
+			"moleculer_list_services",
+			"List all Moleculer services",
+			{
+				title: "List Moleculer services",
+				readOnlyHint: true,
+				destructiveHint: false,
+				idempotentHint: true,
+				openWorldHint: false
+			},
+			async params => {
+				logger.info("Listing Moleculer services...", params);
+				const services = broker.registry.getServiceList({
+					onlyLocal: false,
+					skipInternal: false,
+					withActions: false,
+					withEvents: false,
+					onlyAvailable: false,
+					grouping: true
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text:
+								services
+									.map(
+										a =>
+											`Name: ${a.fullName}, Version: ${a.version || "<no version>"}, Available: ${a.available}`
+									)
+									.join("\n") || "No services found"
 						}
 					]
 				};
@@ -104,9 +178,23 @@ export function McpServerMixin(
 				openWorldHint: false
 			},
 			async params => {
-				// console.log("Listing Moleculer actions...", params);
+				logger.info("Listing Moleculer actions...", params);
+				const actions = broker.registry.getActionList({
+					onlyLocal: false,
+					skipInternal: false,
+					withEndpoints: false,
+					onlyAvailable: false
+				});
 				return {
-					content: []
+					content: [
+						{
+							type: "text",
+							text:
+								actions
+									.map(a => `Name: ${a.name}, Available: ${a.available}`)
+									.join("\n") || "No actions found"
+						}
+					]
 				};
 			}
 		);
@@ -225,7 +313,7 @@ export function McpServerMixin(
 							);
 						} else {
 							this.logger.info(
-								`Establishing new SSE stream for session ${sessionId}`
+								`Establishing new MCP SSE stream for session ${sessionId}`
 							);
 						}
 
@@ -309,7 +397,7 @@ async function main() {
 	// https://github.com/modelcontextprotocol/servers/blob/main/src/everything/streamableHttp.ts
 	//const transporter = new StreamableHTTPServerTransport({})
 	await server.connect(transport);
-	// console.log("MCP Server started.");
+	logger.info("MCP Server started.");
 }
 
 main().catch(err => {

@@ -22,6 +22,36 @@ broker.createService({
 	}
 });
 
+broker.createService({
+	name: "greeter",
+	actions: {
+		hello: {
+			rest: {
+				method: "GET",
+				path: "/hello"
+			},
+			async handler() {
+				return "Hello Moleculer";
+			}
+		},
+
+		/**
+		 * Welcome, a username
+		 *
+		 * @param {String} name - User name
+		 */
+		welcome: {
+			rest: "POST /welcome",
+			params: {
+				name: "string"
+			},
+			async handler(ctx) {
+				return `Welcome, ${ctx.params.name}`;
+			}
+		}
+	}
+});
+
 // Start server
 broker
 	.start()
