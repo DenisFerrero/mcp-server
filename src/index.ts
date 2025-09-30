@@ -8,7 +8,7 @@
 
 import pkg from "../package.json" with { type: "json" };
 
-import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { InMemoryEventStore } from "@modelcontextprotocol/sdk/examples/shared/inMemoryEventStore.js";
 import { ServiceBroker, ServiceSchema } from "moleculer";
@@ -731,18 +731,3 @@ export function McpServerMixin(
 		}
 	};
 }
-
-/*
-async function main() {
-	const transport = new StdioServerTransport();
-	// https://github.com/modelcontextprotocol/servers/blob/main/src/everything/streamableHttp.ts
-	//const transporter = new StreamableHTTPServerTransport({})
-	await server.connect(transport);
-	logger.info("MCP Server started.");
-}
-
-main().catch(err => {
-	// this.logger.error("Error starting MCP Server:", err);
-	process.exit(1);
-});
-*/

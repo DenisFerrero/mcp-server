@@ -1,10 +1,12 @@
-****![Moleculer logo](http://moleculer.services/images/banner.png)
+![Moleculer logo](http://moleculer.services/images/banner.png)
 
 [![Integration & Unit Test](https://github.com/moleculerjs/mcp-server/actions/workflows/test.yml/badge.svg)](https://github.com/moleculerjs/mcp-server/actions/workflows/test.yml)
 [![NPM version](https://badgen.net/npm/v/@moleculer/mcp-server)](https://www.npmjs.com/package/@moleculer/mcp-server)
 
 # @moleculer/mcp-server
 MCP server mixin for Moleculer API Gateway (moleculer-web)
+
+<video controls src="docs/Code_PIxZeLiRX3.mp4" title="Introduction to MCP Server"></video>
 
 ## Install
 
@@ -16,10 +18,43 @@ npm i @moleculer/mcp-server
 
 ## Usage
 
-### Basic Example
+### Add MCP server mixin to your API Gateway service
 
 ```javascript
+import ApiGateway from "moleculer-web";
+import { McpServerMixin } from "../../src/index.js";
+
+// api.service.js
+export default {
+	name: "api",
+	mixins: [ApiGateway, McpServerMixin()],
+	settings: {
+		// Other API gateway settings...
+	}
+};
 ```
+
+The API gateway with MCP server will be available at: `http://localhost:3000/mcp`
+
+### Install into MCP Client
+
+```json
+{
+    "servers": {
+        "moleculer": {
+            "url": "http://localhost:3000/mcp",
+            "type": "http"
+        }
+    }
+}
+```
+
+### Install to Claude Code
+
+```bash
+claude mcp add --transport http moleculer http://127.0.0.1:3000/mcp
+```
+
 
 ## License
 The project is available under the [MIT license](https://tldrlegal.com/license/mit-license).
