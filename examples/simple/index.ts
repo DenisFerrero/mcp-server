@@ -52,6 +52,8 @@ broker.createService({
 	}
 });
 
+broker.loadService(import.meta.dirname + "/products.service.ts");
+
 // Start server
 broker
 	.start()

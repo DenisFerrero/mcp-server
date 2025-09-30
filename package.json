@@ -23,7 +23,7 @@
 		"dev": "set DANGEROUSLY_OMIT_AUTH=true && nodemon --inspect examples/index.ts",
 		"start": "tsx src/index.ts",
 		"inspect": "set DANGEROUSLY_OMIT_AUTH=true && npx @modelcontextprotocol/inspector tsx ./src/index.ts",
-    "client": "tsx examples/client/index.ts",
+		"client": "tsx examples/client/index.ts",
 		"ci": "vitest --watch",
 		"test": "vitest --run --coverage",
 		"deps": "ncu -i && npm audit fix",
@@ -53,11 +53,14 @@
 	},
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.18.0",
-		"lodash": "^4.17.21"
+		"lodash": "^4.17.21",
+		"zod": "^3.25.76"
 	},
 	"devDependencies": {
 		"@eslint/js": "^9.32.0",
 		"@modelcontextprotocol/inspector": "^0.15.0",
+		"@moleculer/database": "github:moleculerjs/database#next",
+		"@seald-io/nedb": "^4.1.2",
 		"@types/lodash": "^4.17.20",
 		"@types/node": "^24.1.0",
 		"@vitest/coverage-v8": "^3.2.4",

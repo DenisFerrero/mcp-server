@@ -11,10 +11,11 @@ import pkg from "../package.json" with { type: "json" };
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { InMemoryEventStore } from "@modelcontextprotocol/sdk/examples/shared/inMemoryEventStore.js";
-import { ServiceSchema } from "moleculer";
+import { ServiceBroker, ServiceSchema } from "moleculer";
 import type { ApiRouteSchema, ApiSettingsSchema } from "moleculer-web";
 import _ from "lodash";
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 
 export interface McpServerMixinOptions {
 	routeOptions?: ApiRouteSchema;
@@ -29,7 +30,7 @@ export function McpServerMixin(
 		}
 	});
 
-	function createServer(broker) {
+	function createServer(broker: ServiceBroker) {
 		const logger = broker.getLogger("MCP");
 
 		logger.info("Creating MCP server...");
@@ -41,13 +42,13 @@ export function McpServerMixin(
 			},
 			{
 				capabilities: {
-					resources: {},
-					tools: {},
-					prompts: {}
+					//resources: {},
+					tools: {}
+					//prompts: {}
 				}
 			}
 		);
-
+		/*
 		server.resource(
 			"actions",
 			"moleculer://actions",
@@ -95,17 +96,31 @@ export function McpServerMixin(
 					]
 				};
 			}
-		);
+		);*/
 
-		server.tool(
+		server.registerTool(
 			"moleculer_list_nodes",
-			"List all Moleculer nodes",
 			{
 				title: "List Moleculer nodes",
-				readOnlyHint: true,
-				destructiveHint: false,
-				idempotentHint: true,
-				openWorldHint: false
+				description: "List all Moleculer nodes",
+				inputSchema: {
+					onlyAvailable: z
+						.boolean()
+						.optional()
+						.default(false)
+						.describe("List only available (online) nodes"),
+					withServices: z
+						.boolean()
+						.optional()
+						.default(false)
+						.describe("Include service schemas")
+				},
+				annotations: {
+					readOnlyHint: true,
+					destructiveHint: false,
+					idempotentHint: true,
+					openWorldHint: false
+				}
 			},
 			async params => {
 				logger.info("Listing Moleculer nodes...", params);
@@ -117,85 +132,411 @@ export function McpServerMixin(
 					content: [
 						{
 							type: "text",
-							text:
-								nodes
+							text: JSON.stringify(nodes, null, 2)
+							/*	nodes
 									.map(
 										a =>
 											`NodeID: ${a.id}, Hostname: ${a.hostname}, Available: ${a.available}, Local: ${a.local}`
 									)
-									.join("\n") || "No nodes found"
+									.join("\n") || "No nodes found" */
 						}
 					]
 				};
 			}
 		);
 
-		server.tool(
+		server.registerTool(
 			"moleculer_list_services",
-			"List all Moleculer services",
 			{
 				title: "List Moleculer services",
-				readOnlyHint: true,
-				destructiveHint: false,
-				idempotentHint: true,
-				openWorldHint: false
+				description: "List all Moleculer services",
+				inputSchema: {
+					onlyLocal: z
+						.boolean()
+						.optional()
+						.default(false)
+						.describe("List only local node services"),
+					onlyAvailable: z
+						.boolean()
+						.optional()
+						.default(false)
+						.describe("List only available (online) services"),
+					skipInternal: z
+						.boolean()
+						.optional()
+						.default(false)
+						.describe("Skip internal services (prefixed with '$')"),
+					withActions: z
+						.boolean()
+						.optional()
+						.default(false)
+						.describe("Include service actions definitions"),
+					withEvents: z
+						.boolean()
+						.optional()
+						.default(false)
+						.describe("Include service events definitions"),
+					grouping: z
+						.boolean()
+						.optional()
+						.default(true)
+						.describe("Group services by name and version")
+				},
+				annotations: {
+					readOnlyHint: true,
+					destructiveHint: false,
+					idempotentHint: true,
+					openWorldHint: false
+				}
 			},
 			async params => {
 				logger.info("Listing Moleculer services...", params);
-				const services = broker.registry.getServiceList({
-					onlyLocal: false,
-					skipInternal: false,
-					withActions: false,
-					withEvents: false,
-					onlyAvailable: false,
-					grouping: true
-				});
+				const services = broker.registry.getServiceList(params);
 				return {
 					content: [
 						{
 							type: "text",
-							text:
-								services
+							text: JSON.stringify(services, null, 2)
+							/* services
 									.map(
 										a =>
 											`Name: ${a.fullName}, Version: ${a.version || "<no version>"}, Available: ${a.available}`
 									)
-									.join("\n") || "No services found"
+									.join("\n") || "No services found" */
 						}
 					]
 				};
 			}
 		);
 
-		server.tool(
+		server.registerTool(
 			"moleculer_list_actions",
-			"List all Moleculer actions",
 			{
 				title: "List Moleculer actions",
-				readOnlyHint: true,
-				destructiveHint: false,
-				idempotentHint: true,
-				openWorldHint: false
+				description: "List all Moleculer actions",
+				inputSchema: {
+					onlyLocal: z
+						.boolean()
+						.optional()
+						.default(false)
+						.describe("List only local node actions"),
+					onlyAvailable: z
+						.boolean()
+						.optional()
+						.default(false)
+						.describe("List only available (online) actions"),
+					skipInternal: z
+						.boolean()
+						.optional()
+						.default(false)
+						.describe("Skip internal actions (prefixed with '$')"),
+					withEndpoints: z
+						.boolean()
+						.optional()
+						.default(false)
+						.describe("Include node endpoint information of actions")
+				},
+				annotations: {
+					readOnlyHint: true,
+					destructiveHint: false,
+					idempotentHint: true,
+					openWorldHint: false
+				}
 			},
 			async params => {
 				logger.info("Listing Moleculer actions...", params);
-				const actions = broker.registry.getActionList({
-					onlyLocal: false,
-					skipInternal: false,
-					withEndpoints: false,
-					onlyAvailable: false
-				});
+				const actions = broker.registry.getActionList(params);
 				return {
 					content: [
 						{
 							type: "text",
-							text:
-								actions
+							text: JSON.stringify(actions, null, 2)
+							/*actions
 									.map(a => `Name: ${a.name}, Available: ${a.available}`)
-									.join("\n") || "No actions found"
+									.join("\n") || "No actions found"*/
 						}
 					]
 				};
+			}
+		);
+
+		server.registerTool(
+			"moleculer_list_events",
+			{
+				title: "List Moleculer events",
+				description: "List all Moleculer events",
+				inputSchema: {
+					onlyLocal: z
+						.boolean()
+						.optional()
+						.default(false)
+						.describe("List only local node events"),
+					onlyAvailable: z
+						.boolean()
+						.optional()
+						.default(false)
+						.describe("List only available (online) events"),
+					skipInternal: z
+						.boolean()
+						.optional()
+						.default(false)
+						.describe("Skip internal events (prefixed with '$')"),
+					withEndpoints: z
+						.boolean()
+						.optional()
+						.default(false)
+						.describe("Include node endpoint information of event listeners")
+				},
+				annotations: {
+					readOnlyHint: true,
+					destructiveHint: false,
+					idempotentHint: true,
+					openWorldHint: false
+				}
+			},
+			async params => {
+				logger.info("Listing Moleculer events...", params);
+				const events = broker.registry.getEventList(params);
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(events, null, 2)
+							/*events
+									.map(
+										a =>
+											`Name: ${a.name}, Group: ${a.group || "<no group>"}, Available: ${a.available}`
+									)
+									.join("\n") || "No events found"*/
+						}
+					]
+				};
+			}
+		);
+
+		/*server.registerTool(
+			"moleculer_call_action_greeter_hello",
+			{
+				title: "Call greeter.hello Action",
+				description: "Call the greeter.hello Moleculer action",
+				inputSchema: {
+					// No parameters for this action
+				},
+				annotations: {
+					readOnlyHint: true,
+					destructiveHint: false,
+					idempotentHint: true,
+					openWorldHint: false
+				}
+			},
+			async params => {
+				logger.info("Calling greeter.hello action...", params);
+				try {
+					const result = await broker.call("greeter.hello");
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify(result, null, 2)
+							}
+						]
+					};
+				} catch (err) {
+					logger.error("Error calling greeter.hello action:", err);
+					return {
+						content: [
+							{
+								type: "text",
+								text:
+									`Error ${err.name}: ${err.message}` +
+									JSON.stringify(err, null, 2)
+							}
+						]
+					};
+				}
+			}
+		);
+
+		server.registerTool(
+			"moleculer_call_action_greeter_welcome",
+			{
+				title: "Call greeter.welcome Action",
+				description: "Call the greeter.welcome Moleculer action",
+				inputSchema: {
+					name: z.string().describe("Name of the person to welcome")
+				},
+				annotations: {
+					readOnlyHint: false,
+					destructiveHint: false,
+					idempotentHint: false,
+					openWorldHint: false
+				}
+			},
+			async params => {
+				logger.info("Calling greeter.welcome action...", params);
+				if (!params.name) {
+					throw new Error("name parameter is required");
+				}
+				try {
+					const result = await broker.call("greeter.welcome", { name: params.name });
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify(result, null, 2)
+							}
+						]
+					};
+				} catch (err) {
+					logger.error("Error calling greeter.welcome action:", err);
+					return {
+						content: [
+							{
+								type: "text",
+								text:
+									`Error ${err.name}: ${err.message}` +
+									JSON.stringify(err, null, 2)
+							}
+						]
+					};
+				}
+			}
+		);
+		*/
+
+		server.registerTool(
+			"moleculer_call_action",
+			{
+				title: "Call Action",
+				description: "Call a Moleculer action",
+				inputSchema: {
+					action: z.string().describe("Action name"),
+					jsonParams: z
+						.string()
+						.describe(
+							'Actions parameters as a JSON object string. E.g. \'{"name":"John"}\'\nIf you don\'t know the parameters of the action, call the `moleculer_list_actions` tool first.'
+						)
+						.optional()
+				},
+				annotations: {
+					readOnlyHint: false,
+					destructiveHint: false,
+					idempotentHint: false,
+					openWorldHint: true
+				}
+			},
+			async params => {
+				logger.info("Calling Moleculer action...", params);
+				if (!params.action) {
+					throw new Error("action parameter is required");
+				}
+
+				let actionParams = {};
+				if (params.jsonParams) {
+					try {
+						actionParams = JSON.parse(params.jsonParams);
+					} catch (err) {
+						throw new Error(
+							"The 'jsonParams' must be a valid JSON object string: " + err.message
+						);
+					}
+				}
+				try {
+					const result = await broker.call(params.action, actionParams);
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify(result, null, 2)
+							}
+						]
+					};
+				} catch (err) {
+					logger.error("Error calling action:", err);
+					return {
+						content: [
+							{
+								type: "text",
+								text:
+									`Error ${err.name}: ${err.message}` +
+									JSON.stringify(err, null, 2)
+							}
+						]
+					};
+				}
+			}
+		);
+
+		server.registerTool(
+			"moleculer_emit_event",
+
+			{
+				title: "Emit (or broadcast) an Event",
+				description: "Emit a Moleculer event",
+				inputSchema: {
+					event: z.string().describe("Event name"),
+					jsonParams: z
+						.string()
+						.describe(
+							'Event parameters as a JSON object string. E.g. \'{"name":"John"}\'\nIf you don\'t know the parameters of the event, call the `moleculer_list_events` tool first.'
+						)
+						.optional(),
+					broadcast: z
+						.boolean()
+						.optional()
+						.default(false)
+						.describe("Set to true to broadcast the event to all nodes")
+				},
+				annotations: {
+					readOnlyHint: false,
+					destructiveHint: false,
+					idempotentHint: false,
+					openWorldHint: true
+				}
+			},
+			async params => {
+				logger.info("Emitting Moleculer event...", params);
+				if (!params.event) {
+					throw new Error("event parameter is required");
+				}
+
+				let eventParams = {};
+				if (params.jsonParams) {
+					try {
+						eventParams = JSON.parse(params.jsonParams);
+					} catch (err) {
+						throw new Error(
+							"The 'jsonParams' must be a valid JSON object string: " + err.message
+						);
+					}
+				}
+				try {
+					if (params.broadcast) {
+						await broker.broadcast(params.event, eventParams);
+					} else {
+						await broker.emit(params.event, eventParams);
+					}
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Event '${params.event}' emitted successfully`
+							}
+						]
+					};
+				} catch (err) {
+					logger.error("Error emitting event:", err);
+					return {
+						content: [
+							{
+								type: "text",
+								text:
+									`Error ${err.name}: ${err.message}` +
+									JSON.stringify(err, null, 2)
+							}
+						]
+					};
+				}
 			}
 		);
 
