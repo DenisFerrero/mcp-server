@@ -6,7 +6,7 @@
 
 "use strict";
 
-import pkg from "../package.json" with { type: "json" };
+import pkg from "../package.json";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
