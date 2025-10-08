@@ -13,7 +13,7 @@ MCP server mixin for Moleculer API Gateway (moleculer-web)
 To install the package, use the following command:
 
 ```bash
-npm i @moleculer/mcp-server
+npm i @moleculer/mcp-server moleculer-web
 ```
 
 ## Usage

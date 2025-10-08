@@ -41,36 +41,6 @@ jobs:
     - name: Install dependencies
       run: npm ci
 
-    - name: Start containers for ${{ matrix.adapter }} adapter
-      run: docker compose up -d redis && sleep 10
-      if: ${{ matrix.adapter == 'Redis' }}
-      working-directory: ./test
-
-    - name: Check containers
-      run: docker compose ps
-      working-directory: ./test
-
-    - name: Check logs
-      run: docker compose logs
-      working-directory: ./test
-
     - name: Run integration tests
       run: npm run test
       timeout-minutes: 15
-      env:
-        GITHUB_ACTIONS_CI: true
-        ADAPTER: ${{ matrix.adapter }}
-
-    # - name: Run leak detection tests
-    #   run: npm run test:leak
-    #   env:
-    #     GITHUB_ACTIONS_CI: true
-
-    - name: Show container logs (in case of failure)
-      run: docker compose logs
-      if: failure()
-      working-directory: ./test
-
-    - name: Stop containers
-      run: docker compose down -v
-      working-directory: ./test
