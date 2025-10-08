@@ -24,7 +24,7 @@ export async function createMcpClient(serverUrl: string): Promise<TestMcpClient>
 		}
 	);
 
-	const transport = new StreamableHTTPClientTransport(serverUrl);
+	const transport = new StreamableHTTPClientTransport(new URL(serverUrl));
 	await client.connect(transport);
 
 	// Get session ID from the transport

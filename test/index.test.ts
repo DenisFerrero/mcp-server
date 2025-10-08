@@ -1,12 +1,22 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { ServiceBroker } from "moleculer";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { ServiceBroker, Service } from "moleculer";
 import ApiGateway from "moleculer-web";
 import { McpServerMixin } from "../src/index.js";
 import { createMcpClient, closeMcpClient, listTools, callTool } from "./mcp-client.js";
+import { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { Server } from "http";
+import type { AddressInfo } from "net";
+
+interface ApiServiceSettings {
+	routes: Array<{
+		path?: string;
+		aliases?: Record<string, unknown>;
+	}>;
+}
 
 describe("MCP Server Integration Tests", () => {
 	let broker: ServiceBroker;
-	let apiService: any;
+	let apiService;
 	const port = 0; // Use random available port
 
 	beforeEach(async () => {
@@ -28,11 +38,17 @@ describe("MCP Server Integration Tests", () => {
 			mixins: [ApiGateway, McpServerMixin()],
 			settings: {
 				port,
-				routes: [{
-					path: "/api"
-				}]
+				routes: [
+					{
+						path: "/api"
+					}
+				]
 			}
-		});
+		}) as Service & {
+			server: Server;
+			settings: ApiServiceSettings;
+			transports: Map<string, unknown>;
+		};
 
 		// Create test greeter service
 		broker.createService({
@@ -114,7 +130,7 @@ describe("MCP Server Integration Tests", () => {
 
 		// Check that MCP route is registered
 		const routes = apiService.settings.routes;
-		const mcpRoute = routes.find((route: any) => route.path === "/mcp");
+		const mcpRoute = routes.find((route: { path?: string }) => route.path === "/mcp");
 
 		expect(mcpRoute).toBeDefined();
 		expect(mcpRoute.aliases).toBeDefined();
@@ -144,7 +160,7 @@ describe("MCP Server Integration Tests", () => {
 		expect(Array.isArray(actions)).toBe(true);
 
 		// Check that our test actions are listed
-		const actionNames = actions.map((a: any) => a.name);
+		const actionNames = actions.map((a: (typeof actions)[number]) => a.name);
 		expect(actionNames).toContain("greeter.hello");
 		expect(actionNames).toContain("greeter.welcome");
 		expect(actionNames).toContain("math.add");
@@ -165,7 +181,7 @@ describe("MCP Server Integration Tests", () => {
 		expect(Array.isArray(services)).toBe(true);
 
 		// Check that our test services are listed
-		const serviceNames = services.map((s: any) => s.fullName);
+		const serviceNames = services.map((s: (typeof services)[number]) => s.fullName);
 		expect(serviceNames).toContain("greeter");
 		expect(serviceNames).toContain("math");
 	});
@@ -185,7 +201,7 @@ describe("MCP Server Integration Tests", () => {
 		expect(nodes.length).toBeGreaterThan(0);
 
 		// Check node structure
-		const localNode = nodes.find((n: any) => n.local === true);
+		const localNode = nodes.find((n: (typeof nodes)[number]) => n.local === true);
 		expect(localNode).toBeDefined();
 		expect(localNode.available).toBe(true);
 	});
@@ -203,7 +219,7 @@ describe("MCP Server Integration Tests", () => {
 		expect(Array.isArray(events)).toBe(true);
 
 		// Check that our test event is listed
-		const eventNames = events.map((e: any) => e.name);
+		const eventNames = events.map((e: (typeof events)[number]) => e.name);
 		expect(eventNames).toContain("math.calculated");
 	});
 
@@ -212,7 +228,8 @@ describe("MCP Server Integration Tests", () => {
 
 		// Get server URL
 		const serverInfo = apiService.server;
-		const port = serverInfo.address().port;
+		const address = serverInfo.address() as AddressInfo;
+		const port = address.port;
 		const serverUrl = `http://localhost:${port}/mcp`;
 
 		// Create MCP client
@@ -226,7 +243,7 @@ describe("MCP Server Integration Tests", () => {
 			expect(Array.isArray(tools)).toBe(true);
 
 			// Check that our MCP tools are registered
-			const toolNames = tools.map((tool: any) => tool.name);
+			const toolNames = tools.map((tool: Tool) => tool.name);
 			expect(toolNames).toContain("moleculer_list_nodes");
 			expect(toolNames).toContain("moleculer_list_services");
 			expect(toolNames).toContain("moleculer_list_actions");
@@ -241,9 +258,13 @@ describe("MCP Server Integration Tests", () => {
 	it("should call actions via MCP tool", async () => {
 		await broker.start();
 
+		// Mock the broker's call method
+		const callSpy = vi.spyOn(broker, "call");
+
 		// Get server URL
 		const serverInfo = apiService.server;
-		const port = serverInfo.address().port;
+		const address = serverInfo.address() as AddressInfo;
+		const port = address.port;
 		const serverUrl = `http://localhost:${port}/mcp`;
 
 		// Create MCP client
@@ -261,6 +282,9 @@ describe("MCP Server Integration Tests", () => {
 			const parsedHelloResult = JSON.parse(helloResult.content[0].text);
 			expect(parsedHelloResult).toBe("Hello Moleculer");
 
+			// Verify that broker.call was called correctly
+			expect(callSpy).toHaveBeenCalledWith("greeter.hello", {});
+
 			// Test calling greeter.welcome action with parameters
 			const welcomeResult = await callTool(mcpClient, "moleculer_call_action", {
 				action: "greeter.welcome",
@@ -271,6 +295,9 @@ describe("MCP Server Integration Tests", () => {
 			expect(welcomeResult.content[0].type).toBe("text");
 			const parsedWelcomeResult = JSON.parse(welcomeResult.content[0].text);
 			expect(parsedWelcomeResult).toBe("Welcome, John");
+
+			// Verify that broker.call was called correctly
+			expect(callSpy).toHaveBeenCalledWith("greeter.welcome", { name: "John" });
 
 			// Test calling math.add action
 			const addResult = await callTool(mcpClient, "moleculer_call_action", {
@@ -283,6 +310,9 @@ describe("MCP Server Integration Tests", () => {
 			const parsedAddResult = JSON.parse(addResult.content[0].text);
 			expect(parsedAddResult).toBe(8);
 
+			// Verify that broker.call was called correctly
+			expect(callSpy).toHaveBeenCalledWith("math.add", { a: 5, b: 3 });
+
 			// Test calling math.multiply action
 			const multiplyResult = await callTool(mcpClient, "moleculer_call_action", {
 				action: "math.multiply",
@@ -293,8 +323,15 @@ describe("MCP Server Integration Tests", () => {
 			expect(multiplyResult.content[0].type).toBe("text");
 			const parsedMultiplyResult = JSON.parse(multiplyResult.content[0].text);
 			expect(parsedMultiplyResult).toBe(24);
+
+			// Verify that broker.call was called correctly
+			expect(callSpy).toHaveBeenCalledWith("math.multiply", { a: 4, b: 6 });
+
+			// Verify total number of calls
+			expect(callSpy).toHaveBeenCalledTimes(4);
 		} finally {
 			await closeMcpClient(mcpClient);
+			callSpy.mockRestore();
 		}
 	});
 
@@ -303,7 +340,8 @@ describe("MCP Server Integration Tests", () => {
 
 		// Get server URL
 		const serverInfo = apiService.server;
-		const port = serverInfo.address().port;
+		const address = serverInfo.address() as AddressInfo;
+		const port = address.port;
 		const serverUrl = `http://localhost:${port}/mcp`;
 
 		// Create MCP client
@@ -341,9 +379,14 @@ describe("MCP Server Integration Tests", () => {
 	it("should emit events via MCP tool", async () => {
 		await broker.start();
 
+		// Mock the broker's emit method
+		const emitSpy = vi.spyOn(broker, "emit");
+		const broadcastSpy = vi.spyOn(broker, "broadcast");
+
 		// Get server URL
 		const serverInfo = apiService.server;
-		const port = serverInfo.address().port;
+		const address = serverInfo.address() as AddressInfo;
+		const port = address.port;
 		const serverUrl = `http://localhost:${port}/mcp`;
 
 		// Create MCP client
@@ -358,18 +401,37 @@ describe("MCP Server Integration Tests", () => {
 
 			expect(result.content).toBeDefined();
 			expect(result.content[0].type).toBe("text");
-			expect(result.content[0].text).toContain("Event 'math.calculated' emitted successfully");
+			expect(result.content[0].text).toContain(
+				"Event 'math.calculated' emitted successfully"
+			);
+
+			// Verify that emit was called with correct parameters
+			expect(emitSpy).toHaveBeenCalledWith("math.calculated", {
+				result: 42,
+				operation: "test"
+			});
+			expect(emitSpy).toHaveBeenCalledTimes(1);
+
+			// Verify that broadcast was not called
+			expect(broadcastSpy).not.toHaveBeenCalled();
 		} finally {
 			await closeMcpClient(mcpClient);
+			emitSpy.mockRestore();
+			broadcastSpy.mockRestore();
 		}
 	});
 
 	it("should broadcast events via MCP tool", async () => {
 		await broker.start();
 
+		// Mock the broker's emit and broadcast methods
+		const emitSpy = vi.spyOn(broker, "emit");
+		const broadcastSpy = vi.spyOn(broker, "broadcast");
+
 		// Get server URL
 		const serverInfo = apiService.server;
-		const port = serverInfo.address().port;
+		const address = serverInfo.address() as AddressInfo;
+		const port = address.port;
 		const serverUrl = `http://localhost:${port}/mcp`;
 
 		// Create MCP client
@@ -385,9 +447,23 @@ describe("MCP Server Integration Tests", () => {
 
 			expect(result.content).toBeDefined();
 			expect(result.content[0].type).toBe("text");
-			expect(result.content[0].text).toContain("Event 'math.calculated' emitted successfully");
+			expect(result.content[0].text).toContain(
+				"Event 'math.calculated' emitted successfully"
+			);
+
+			// Verify that broadcast was called with correct parameters
+			expect(broadcastSpy).toHaveBeenCalledWith("math.calculated", {
+				result: 100,
+				operation: "broadcast test"
+			});
+			expect(broadcastSpy).toHaveBeenCalledTimes(1);
+
+			// Verify that emit was not called
+			expect(emitSpy).not.toHaveBeenCalled();
 		} finally {
 			await closeMcpClient(mcpClient);
+			emitSpy.mockRestore();
+			broadcastSpy.mockRestore();
 		}
 	});
 
@@ -396,7 +472,8 @@ describe("MCP Server Integration Tests", () => {
 
 		// Get server URL
 		const serverInfo = apiService.server;
-		const port = serverInfo.address().port;
+		const address = serverInfo.address() as AddressInfo;
+		const port = address.port;
 		const serverUrl = `http://localhost:${port}/mcp`;
 
 		// Create MCP client
@@ -410,11 +487,14 @@ describe("MCP Server Integration Tests", () => {
 				});
 				// Should not reach here
 				expect.fail("Should have thrown an MCP error");
-			} catch (err: any) {
+			} catch (err: unknown) {
 				expect(err).toBeDefined();
-				expect(err.message).toContain("Invalid arguments for tool");
-				expect(err.message).toContain("action");
-				expect(err.message).toContain("Required");
+				expect(err instanceof Error).toBe(true);
+				if (err instanceof Error) {
+					expect(err.message).toContain("Invalid arguments for tool");
+					expect(err.message).toContain("action");
+					expect(err.message).toContain("Required");
+				}
 			}
 
 			// Test emitting event without event parameter - this should throw an MCP error
@@ -424,11 +504,14 @@ describe("MCP Server Integration Tests", () => {
 				});
 				// Should not reach here
 				expect.fail("Should have thrown an MCP error");
-			} catch (err: any) {
+			} catch (err: unknown) {
 				expect(err).toBeDefined();
-				expect(err.message).toContain("Invalid arguments for tool");
-				expect(err.message).toContain("event");
-				expect(err.message).toContain("Required");
+				expect(err instanceof Error).toBe(true);
+				if (err instanceof Error) {
+					expect(err.message).toContain("Invalid arguments for tool");
+					expect(err.message).toContain("event");
+					expect(err.message).toContain("Required");
+				}
 			}
 		} finally {
 			await closeMcpClient(mcpClient);
@@ -438,9 +521,16 @@ describe("MCP Server Integration Tests", () => {
 	it("should list Moleculer entities via MCP tools", async () => {
 		await broker.start();
 
+		// Mock the registry methods
+		const getActionListSpy = vi.spyOn(broker.registry, "getActionList");
+		const getServiceListSpy = vi.spyOn(broker.registry, "getServiceList");
+		const getNodeListSpy = vi.spyOn(broker.registry, "getNodeList");
+		const getEventListSpy = vi.spyOn(broker.registry, "getEventList");
+
 		// Get server URL
 		const serverInfo = apiService.server;
-		const port = serverInfo.address().port;
+		const address = serverInfo.address() as AddressInfo;
+		const port = address.port;
 		const serverUrl = `http://localhost:${port}/mcp`;
 
 		// Create MCP client
@@ -459,11 +549,19 @@ describe("MCP Server Integration Tests", () => {
 			expect(Array.isArray(actions)).toBe(true);
 
 			// Check that our test actions are listed
-			const actionNames = actions.map((a: any) => a.name);
+			const actionNames = actions.map((a: (typeof actions)[number]) => a.name);
 			expect(actionNames).toContain("greeter.hello");
 			expect(actionNames).toContain("greeter.welcome");
 			expect(actionNames).toContain("math.add");
 			expect(actionNames).toContain("math.multiply");
+
+			// Verify that getActionList was called with correct parameters (including defaults)
+			expect(getActionListSpy).toHaveBeenCalledWith({
+				onlyAvailable: true,
+				skipInternal: true,
+				onlyLocal: false,
+				withEndpoints: false
+			});
 
 			// Test listing services
 			const servicesResult = await callTool(mcpClient, "moleculer_list_services", {
@@ -478,9 +576,19 @@ describe("MCP Server Integration Tests", () => {
 			expect(Array.isArray(services)).toBe(true);
 
 			// Check that our test services are listed
-			const serviceNames = services.map((s: any) => s.fullName);
+			const serviceNames = services.map((s: (typeof services)[number]) => s.fullName);
 			expect(serviceNames).toContain("greeter");
 			expect(serviceNames).toContain("math");
+
+			// Verify that getServiceList was called with correct parameters (including defaults)
+			expect(getServiceListSpy).toHaveBeenCalledWith({
+				onlyAvailable: true,
+				skipInternal: true,
+				withActions: true,
+				onlyLocal: false,
+				withEvents: false,
+				grouping: true
+			});
 
 			// Test listing nodes
 			const nodesResult = await callTool(mcpClient, "moleculer_list_nodes", {
@@ -496,9 +604,15 @@ describe("MCP Server Integration Tests", () => {
 			expect(nodes.length).toBeGreaterThan(0);
 
 			// Check node structure
-			const localNode = nodes.find((n: any) => n.local === true);
+			const localNode = nodes.find((n: (typeof nodes)[number]) => n.local === true);
 			expect(localNode).toBeDefined();
 			expect(localNode.available).toBe(true);
+
+			// Verify that getNodeList was called with correct parameters (including defaults)
+			expect(getNodeListSpy).toHaveBeenCalledWith({
+				onlyAvailable: false, // default value in the schema
+				withServices: false
+			});
 
 			// Test listing events
 			const eventsResult = await callTool(mcpClient, "moleculer_list_events", {
@@ -512,10 +626,22 @@ describe("MCP Server Integration Tests", () => {
 			expect(Array.isArray(events)).toBe(true);
 
 			// Check that our test event is listed
-			const eventNames = events.map((e: any) => e.name);
+			const eventNames = events.map((e: (typeof events)[number]) => e.name);
 			expect(eventNames).toContain("math.calculated");
+
+			// Verify that getEventList was called with correct parameters (including defaults)
+			expect(getEventListSpy).toHaveBeenCalledWith({
+				onlyAvailable: true,
+				skipInternal: true,
+				onlyLocal: false,
+				withEndpoints: false
+			});
 		} finally {
 			await closeMcpClient(mcpClient);
+			getActionListSpy.mockRestore();
+			getServiceListSpy.mockRestore();
+			getNodeListSpy.mockRestore();
+			getEventListSpy.mockRestore();
 		}
 	});
 
