@@ -7,7 +7,14 @@
 
 import { ServiceBroker } from "moleculer";
 import ApiGateway from "moleculer-web";
-import { McpServerMixin } from "../../src/index.js";
+import { McpServerMixin } from "../../src/index.ts";
+import url from "url";
+import path from "path";
+
+let dirname = import.meta.dirname;
+if (!dirname) {
+	dirname = path.dirname(url.fileURLToPath(import.meta.url));
+}
 
 import process from "node:process";
 
@@ -52,7 +59,7 @@ broker.createService({
 	}
 });
 
-broker.loadService(import.meta.dirname + "/products.service.ts");
+broker.loadService(dirname + "/products.service.ts");
 
 // Start server
 broker

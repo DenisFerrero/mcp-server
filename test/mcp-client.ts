@@ -28,7 +28,7 @@ export async function createMcpClient(serverUrl: string): Promise<TestMcpClient>
 	await client.connect(transport);
 
 	// Get session ID from the transport
-	const sessionId = (transport as any).sessionId;
+	const sessionId = transport.sessionId;
 
 	return {
 		client,
@@ -41,12 +41,12 @@ export async function closeMcpClient(mcpClient: TestMcpClient): Promise<void> {
 	try {
 		await mcpClient.client.close();
 		await mcpClient.transport.close();
-	} catch (error) {
+	} catch {
 		// Ignore cleanup errors
 	}
 }
 
-export async function listTools(mcpClient: TestMcpClient): Promise<any[]> {
+export async function listTools(mcpClient: TestMcpClient): Promise<unknown[]> {
 	const result = await mcpClient.client.listTools();
 	return result.tools || [];
 }
@@ -54,8 +54,8 @@ export async function listTools(mcpClient: TestMcpClient): Promise<any[]> {
 export async function callTool(
 	mcpClient: TestMcpClient,
 	toolName: string,
-	arguments_: Record<string, any>
-): Promise<any> {
+	arguments_: Record<string, unknown>
+): Promise<unknown> {
 	const result = await mcpClient.client.callTool({
 		name: toolName,
 		arguments: arguments_
