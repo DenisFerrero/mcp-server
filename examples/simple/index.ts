@@ -25,7 +25,10 @@ broker.createService({
 	name: "api",
 	mixins: [ApiGateway, McpServerMixin()],
 	settings: {
-		port: 3300
+		port: 3300,
+		mcp: {
+			whitelist: ["products.*"]
+		}
 	}
 });
 

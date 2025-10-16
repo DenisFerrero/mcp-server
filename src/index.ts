@@ -8,14 +8,18 @@
 
 import pkg from "../package.json";
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { InMemoryEventStore } from "@modelcontextprotocol/sdk/examples/shared/inMemoryEventStore.js";
-import { ServiceBroker, ServiceSchema } from "moleculer";
+import { ActionSchema, ServiceBroker, ServiceSchema, Utils } from "moleculer";
 import type { ApiRouteSchema, ApiSettingsSchema } from "moleculer-web";
 import _ from "lodash";
 import { randomUUID } from "node:crypto";
-import { z } from "zod";
+import { McpServerSettings } from "./index.type.ts";
+import { ZodParser } from "./validators/validators.types.ts";
+import getParser from "./validators/index.ts";
+import { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
+import { ZodRawShape } from "zod";
 
 export interface McpServerMixinOptions {
 	routeOptions?: ApiRouteSchema;
@@ -30,7 +34,7 @@ export function McpServerMixin(
 		}
 	});
 
-	function createServer(broker: ServiceBroker) {
+	function createServer(broker: ServiceBroker): McpServer {
 		const logger = broker.getLogger("MCP");
 
 		logger.info("Creating MCP server...");
@@ -42,500 +46,9 @@ export function McpServerMixin(
 			},
 			{
 				capabilities: {
-					//resources: {},
-					tools: {}
-					//prompts: {}
-				}
-			}
-		);
-		/*
-		server.resource(
-			"actions",
-			"moleculer://actions",
-			{
-				description: "Get all Moleculer actions",
-				title: "Moleculer Actions",
-				mimeType: "application/json"
-			},
-			async uri => {
-				logger.info("Fetching Moleculer actions...", uri);
-				return {
-					contents: [
-						{
-							uri: uri.href,
-							mimeType: "application/json",
-							text: JSON.stringify([{ name: "greeter.hello" }])
-						}
-					]
-				};
-			}
-		);
-
-		server.resource(
-			"action-details",
-			new ResourceTemplate("moleculer://actions/{actionName}", {
-				list: undefined
-			}),
-			{
-				description: "Get details of a specific Moleculer action",
-				title: "Moleculer Action Details",
-				mimeType: "application/json"
-			},
-			async (uri, params: { actionName: string }) => {
-				logger.info("Fetching Moleculer action details...", uri);
-				return {
-					contents: [
-						{
-							uri: uri.href,
-							mimeType: "application/json",
-							text: JSON.stringify({
-								name: params.actionName,
-								params: { name: { type: "string" } }
-							})
-						}
-					]
-				};
-			}
-		);*/
-
-		server.registerTool(
-			"moleculer_list_nodes",
-			{
-				title: "List Moleculer nodes",
-				description: "List all Moleculer nodes",
-				inputSchema: {
-					onlyAvailable: z
-						.boolean()
-						.optional()
-						.default(false)
-						.describe("List only available (online) nodes"),
-					withServices: z
-						.boolean()
-						.optional()
-						.default(false)
-						.describe("Include service schemas")
-				},
-				annotations: {
-					readOnlyHint: true,
-					destructiveHint: false,
-					idempotentHint: true,
-					openWorldHint: false
-				}
-			},
-			async params => {
-				logger.info("Listing Moleculer nodes...", params);
-				const nodes = broker.registry.getNodeList({
-					withServices: false,
-					onlyAvailable: false
-				});
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify(nodes, null, 2)
-							/*	nodes
-									.map(
-										a =>
-											`NodeID: ${a.id}, Hostname: ${a.hostname}, Available: ${a.available}, Local: ${a.local}`
-									)
-									.join("\n") || "No nodes found" */
-						}
-					]
-				};
-			}
-		);
-
-		server.registerTool(
-			"moleculer_list_services",
-			{
-				title: "List Moleculer services",
-				description: "List all Moleculer services",
-				inputSchema: {
-					onlyLocal: z
-						.boolean()
-						.optional()
-						.default(false)
-						.describe("List only local node services"),
-					onlyAvailable: z
-						.boolean()
-						.optional()
-						.default(false)
-						.describe("List only available (online) services"),
-					skipInternal: z
-						.boolean()
-						.optional()
-						.default(false)
-						.describe("Skip internal services (prefixed with '$')"),
-					withActions: z
-						.boolean()
-						.optional()
-						.default(false)
-						.describe("Include service actions definitions"),
-					withEvents: z
-						.boolean()
-						.optional()
-						.default(false)
-						.describe("Include service events definitions"),
-					grouping: z
-						.boolean()
-						.optional()
-						.default(true)
-						.describe("Group services by name and version")
-				},
-				annotations: {
-					readOnlyHint: true,
-					destructiveHint: false,
-					idempotentHint: true,
-					openWorldHint: false
-				}
-			},
-			async params => {
-				logger.info("Listing Moleculer services...", params);
-				const services = broker.registry.getServiceList(params);
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify(services, null, 2)
-							/* services
-									.map(
-										a =>
-											`Name: ${a.fullName}, Version: ${a.version || "<no version>"}, Available: ${a.available}`
-									)
-									.join("\n") || "No services found" */
-						}
-					]
-				};
-			}
-		);
-
-		server.registerTool(
-			"moleculer_list_actions",
-			{
-				title: "List Moleculer actions",
-				description: "List all Moleculer actions",
-				inputSchema: {
-					onlyLocal: z
-						.boolean()
-						.optional()
-						.default(false)
-						.describe("List only local node actions"),
-					onlyAvailable: z
-						.boolean()
-						.optional()
-						.default(false)
-						.describe("List only available (online) actions"),
-					skipInternal: z
-						.boolean()
-						.optional()
-						.default(false)
-						.describe("Skip internal actions (prefixed with '$')"),
-					withEndpoints: z
-						.boolean()
-						.optional()
-						.default(false)
-						.describe("Include node endpoint information of actions")
-				},
-				annotations: {
-					readOnlyHint: true,
-					destructiveHint: false,
-					idempotentHint: true,
-					openWorldHint: false
-				}
-			},
-			async params => {
-				logger.info("Listing Moleculer actions...", params);
-				const actions = broker.registry.getActionList(params);
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify(actions, null, 2)
-							/*actions
-									.map(a => `Name: ${a.name}, Available: ${a.available}`)
-									.join("\n") || "No actions found"*/
-						}
-					]
-				};
-			}
-		);
-
-		server.registerTool(
-			"moleculer_list_events",
-			{
-				title: "List Moleculer events",
-				description: "List all Moleculer events",
-				inputSchema: {
-					onlyLocal: z
-						.boolean()
-						.optional()
-						.default(false)
-						.describe("List only local node events"),
-					onlyAvailable: z
-						.boolean()
-						.optional()
-						.default(false)
-						.describe("List only available (online) events"),
-					skipInternal: z
-						.boolean()
-						.optional()
-						.default(false)
-						.describe("Skip internal events (prefixed with '$')"),
-					withEndpoints: z
-						.boolean()
-						.optional()
-						.default(false)
-						.describe("Include node endpoint information of event listeners")
-				},
-				annotations: {
-					readOnlyHint: true,
-					destructiveHint: false,
-					idempotentHint: true,
-					openWorldHint: false
-				}
-			},
-			async params => {
-				logger.info("Listing Moleculer events...", params);
-				const events = broker.registry.getEventList(params);
-				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify(events, null, 2)
-							/*events
-									.map(
-										a =>
-											`Name: ${a.name}, Group: ${a.group || "<no group>"}, Available: ${a.available}`
-									)
-									.join("\n") || "No events found"*/
-						}
-					]
-				};
-			}
-		);
-
-		/*server.registerTool(
-			"moleculer_call_action_greeter_hello",
-			{
-				title: "Call greeter.hello Action",
-				description: "Call the greeter.hello Moleculer action",
-				inputSchema: {
-					// No parameters for this action
-				},
-				annotations: {
-					readOnlyHint: true,
-					destructiveHint: false,
-					idempotentHint: true,
-					openWorldHint: false
-				}
-			},
-			async params => {
-				logger.info("Calling greeter.hello action...", params);
-				try {
-					const result = await broker.call("greeter.hello");
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify(result, null, 2)
-							}
-						]
-					};
-				} catch (err) {
-					logger.error("Error calling greeter.hello action:", err);
-					return {
-						content: [
-							{
-								type: "text",
-								text:
-									`Error ${err.name}: ${err.message}` +
-									JSON.stringify(err, null, 2)
-							}
-						]
-					};
-				}
-			}
-		);
-
-		server.registerTool(
-			"moleculer_call_action_greeter_welcome",
-			{
-				title: "Call greeter.welcome Action",
-				description: "Call the greeter.welcome Moleculer action",
-				inputSchema: {
-					name: z.string().describe("Name of the person to welcome")
-				},
-				annotations: {
-					readOnlyHint: false,
-					destructiveHint: false,
-					idempotentHint: false,
-					openWorldHint: false
-				}
-			},
-			async params => {
-				logger.info("Calling greeter.welcome action...", params);
-				if (!params.name) {
-					throw new Error("name parameter is required");
-				}
-				try {
-					const result = await broker.call("greeter.welcome", { name: params.name });
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify(result, null, 2)
-							}
-						]
-					};
-				} catch (err) {
-					logger.error("Error calling greeter.welcome action:", err);
-					return {
-						content: [
-							{
-								type: "text",
-								text:
-									`Error ${err.name}: ${err.message}` +
-									JSON.stringify(err, null, 2)
-							}
-						]
-					};
-				}
-			}
-		);
-		*/
-
-		server.registerTool(
-			"moleculer_call_action",
-			{
-				title: "Call Action",
-				description: "Call a Moleculer action",
-				inputSchema: {
-					action: z.string().describe("Action name"),
-					jsonParams: z
-						.string()
-						.describe(
-							'Actions parameters as a JSON object string. E.g. \'{"name":"John"}\'\nIf you don\'t know the parameters of the action, call the `moleculer_list_actions` tool first.'
-						)
-						.optional()
-				},
-				annotations: {
-					readOnlyHint: false,
-					destructiveHint: false,
-					idempotentHint: false,
-					openWorldHint: true
-				}
-			},
-			async params => {
-				logger.info("Calling Moleculer action...", params);
-				if (!params.action) {
-					throw new Error("action parameter is required");
-				}
-
-				let actionParams = {};
-				if (params.jsonParams) {
-					try {
-						actionParams = JSON.parse(params.jsonParams);
-					} catch (err) {
-						throw new Error(
-							"The 'jsonParams' must be a valid JSON object string: " + err.message
-						);
-					}
-				}
-				try {
-					const result = await broker.call(params.action, actionParams);
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify(result, null, 2)
-							}
-						]
-					};
-				} catch (err) {
-					logger.error("Error calling action:", err);
-					return {
-						content: [
-							{
-								type: "text",
-								text:
-									`Error ${err.name}: ${err.message}` +
-									JSON.stringify(err, null, 2)
-							}
-						]
-					};
-				}
-			}
-		);
-
-		server.registerTool(
-			"moleculer_emit_event",
-
-			{
-				title: "Emit (or broadcast) an Event",
-				description: "Emit a Moleculer event",
-				inputSchema: {
-					event: z.string().describe("Event name"),
-					jsonParams: z
-						.string()
-						.describe(
-							'Event parameters as a JSON object string. E.g. \'{"name":"John"}\'\nIf you don\'t know the parameters of the event, call the `moleculer_list_events` tool first.'
-						)
-						.optional(),
-					broadcast: z
-						.boolean()
-						.optional()
-						.default(false)
-						.describe("Set to true to broadcast the event to all nodes")
-				},
-				annotations: {
-					readOnlyHint: false,
-					destructiveHint: false,
-					idempotentHint: false,
-					openWorldHint: true
-				}
-			},
-			async params => {
-				logger.info("Emitting Moleculer event...", params);
-				if (!params.event) {
-					throw new Error("event parameter is required");
-				}
-
-				let eventParams = {};
-				if (params.jsonParams) {
-					try {
-						eventParams = JSON.parse(params.jsonParams);
-					} catch (err) {
-						throw new Error(
-							"The 'jsonParams' must be a valid JSON object string: " + err.message
-						);
-					}
-				}
-				try {
-					if (params.broadcast) {
-						await broker.broadcast(params.event, eventParams);
-					} else {
-						await broker.emit(params.event, eventParams);
-					}
-					return {
-						content: [
-							{
-								type: "text",
-								text: `Event '${params.event}' emitted successfully`
-							}
-						]
-					};
-				} catch (err) {
-					logger.error("Error emitting event:", err);
-					return {
-						content: [
-							{
-								type: "text",
-								text:
-									`Error ${err.name}: ${err.message}` +
-									JSON.stringify(err, null, 2)
-							}
-						]
-					};
+					// resources: {},
+					tools: { listChanged: true }
+					// prompts: {}
 				}
 			}
 		);
@@ -543,9 +56,177 @@ export function McpServerMixin(
 		return server;
 	}
 
+	const mcp: McpServerSettings = {
+		whitelist: [],
+		tools: [],
+		regenerationDebounceTime: 1000,
+		cache: {
+			tools: []
+		}
+	};
+
 	return {
+		settings: {
+			mcp,
+			server: null,
+
+			$secureSettings: ["mcp.server", "mcp.cache"]
+		},
+
+		methods: {
+			/**
+			 * Check whatever a target action can be called using a MCP tool.
+			 * Match the action using the whitelist, exclude the action using a blacklist
+			 * @param {ActionSchema} action Action name
+			 * @returns {boolean} True if the action can be a tool, false otherwise
+			 */
+			isTool(action: ActionSchema): boolean {
+				// Whitelist check
+				let inWhitelist = false;
+				for (const mask of (this.settings.mcp as McpServerSettings).whitelist ?? []) {
+					if (mask instanceof RegExp) {
+						if (mask.test(action.name)) {
+							inWhitelist = true;
+							break;
+						}
+					} else if (typeof mask === "string") {
+						if (Utils.match(action.name, mask)) {
+							inWhitelist = true;
+							break;
+						}
+					}
+				}
+
+				if (!inWhitelist) return false;
+
+				// Blacklist check
+				let inBlacklist = false;
+				for (const mask of (this.settings.mcp as McpServerSettings).blacklist ?? []) {
+					if (mask instanceof RegExp) {
+						if (mask.test(action.name)) {
+							inBlacklist = true;
+							break;
+						}
+					} else if (typeof mask === "string") {
+						if (Utils.match(action.name, mask)) {
+							inBlacklist = true;
+							break;
+						}
+					}
+				}
+
+				if (inBlacklist) return false;
+
+				if (action.visibility !== null && action.visibility !== "published") return false;
+
+				return true;
+			},
+			/**
+			 * Normalize action name to MCP ready name:
+			 * - Replace . with _
+			 * - Replace uppercase letters with _ + lowercase value
+			 * @param {string} action Action name
+			 * @returns {string} Normalized action name
+			 */
+			normalizeMcpActionName(action: string): string {
+				return action.replace(/\./g, "_").replace(/([A-Z])/g, m => "_" + m.toLowerCase());
+			},
+			/**
+			 * Humanize action name to MCP ready title:
+			 * - Replace . with " "
+			 * - Replace uppercase letters with " " + lowercase value
+			 * - Capitalize first letter of the string if applicable
+			 * @param {string} action Action name
+			 * @returns {string} Humanized action name
+			 */
+			humanizeMcpActionName(action: string): string {
+				return action
+					.replace(/\./g, " ")
+					.replace(/([A-Z])/g, m => " " + m.toLocaleLowerCase())
+					.replace(/^([a-z])/, m => m.toLocaleUpperCase());
+			},
+			/**
+			 * Regenerate the tools based on the available actions in the registry
+			 */
+			_regenerateMcpHandlers() {
+				const actions = (this.broker as ServiceBroker).registry.getActionList({
+					onlyAvailable: true
+				});
+
+				// Remove old tools
+				for (const tool of this.settings.mcp.cache.tools as Array<RegisteredTool>) {
+					tool.remove();
+				}
+				this.settings.mcp.cache.tools = [];
+
+				// TODO Find a way to detect the validator used for each service's action
+				const parser: ZodParser = getParser("FastestValidator");
+
+				for (const action of actions) {
+					if (this.isTool(action.action)) {
+						const toolName: string = this.normalizeMcpActionName(action.name);
+						const toolTitle: string =
+							(action.action["metadata"]?.title as string) ??
+							this.humanizeMcpActionName(action.name);
+						const toolDescription: string =
+							(action.action["metadata"]?.description as string) ?? toolTitle;
+
+						const toolConfig: {
+							title?: string;
+							description?: string;
+							inputSchema?: ZodRawShape;
+							outputSchema?: ZodRawShape;
+							annotations?: ToolAnnotations;
+							_meta?: Record<string, unknown>;
+						} = {
+							title: toolTitle,
+							description: toolDescription,
+							inputSchema: parser.parse(action.action.params ?? {})
+						};
+
+						const tool = (this.settings.mcp.server as McpServer).registerTool(
+							toolName,
+							toolConfig,
+							async params => {
+								this.logger.debug("Calling action: " + action.name);
+
+								// Params handling for $$root parameters
+								let actionParams = params;
+								if (action.action.params.$$root === true) {
+									actionParams = params.$$root;
+								}
+
+								const result = await (this.broker as ServiceBroker).call(
+									action.name,
+									actionParams
+								);
+
+								return {
+									content: [
+										{
+											type: "text",
+											text: JSON.stringify(result, null, 2)
+										}
+									]
+								};
+							}
+						);
+
+						this.logger.info(`[MCP tool] ${toolConfig.title} => ${action.name}`);
+
+						this.settings.mcp.cache.tools.push(tool);
+					}
+				}
+			}
+		},
+		events: {
+			"$services.changed"() {
+				this.regenerateMcpHandlers();
+			}
+		},
 		created() {
 			this.transports = new Map<string, StreamableHTTPServerTransport>();
+			this.settings.mcp.server = createServer(this.broker);
 
 			const route = _.defaultsDeep(mixinOptions?.routeOptions, {
 				aliases: {
@@ -560,13 +241,13 @@ export function McpServerMixin(
 								// Reuse existing transport
 								transport = this.transports.get(sessionId)!;
 							} else if (!sessionId) {
-								const { server } = createServer(this.broker);
+								const { server } = this.settings.mcp.server;
 
 								// New initialization request
 								const eventStore = new InMemoryEventStore();
 								transport = new StreamableHTTPServerTransport({
 									sessionIdGenerator: () => randomUUID(),
-									eventStore, // Enable resumability
+									eventStore, // Enable reusability
 									onsessioninitialized: (sessionId: string) => {
 										// Store the transport by session ID when session is initialized
 										// This avoids race conditions where requests might come in before the session is stored
@@ -646,7 +327,7 @@ export function McpServerMixin(
 							return;
 						}
 
-						// Check for Last-Event-ID header for resumability
+						// Check for Last-Event-ID header for reusability
 						const lastEventId = req.headers["last-event-id"] as string | undefined;
 						if (lastEventId) {
 							this.logger.info(
@@ -711,6 +392,16 @@ export function McpServerMixin(
 
 			// Add route
 			this.settings.routes.unshift(route);
+
+			// Create debounced version of the regenerate method
+			this.regenerateMcpHandlers = _.debounce(
+				this._regenerateMcpHandlers,
+				this.settings.mcp.regenerationDebounceTime
+			);
+		},
+
+		started() {
+			this.regenerateMcpHandlers();
 		},
 
 		async stopped() {
