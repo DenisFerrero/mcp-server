@@ -1,13 +1,10 @@
 import z, { ZodRawShape } from "zod";
-import Validator, {
-	ValidationRule,
-	ValidationRuleObject,
-	ValidationSchema
-} from "fastest-validator";
+import { ValidationRule, ValidationRuleObject, ValidationSchema } from "fastest-validator";
+import Validator from "fastest-validator";
 import { ZodParser } from "./validators.types.ts";
 
-// @ts-expect-error: The import of the class is correct but without this line gives error
-const v = new Validator();
+// TODO @Icebob how we fix it?
+const v = new (Validator as any)();
 
 export default class ZodParser_FastestValidator implements ZodParser {
 	constructor() {}
