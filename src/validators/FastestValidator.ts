@@ -575,7 +575,7 @@ export default class ZodParser_FastestValidator implements ZodParser {
 				valueSet = valueSet.default(value.default);
 			}
 
-			pipelines.push(valueSet.refine((arg: unknown) => value.values.find(arg)));
+			pipelines.push(valueSet.refine((arg: unknown) => value.values.find(v => v === arg)));
 
 			// No pre-process rules
 
@@ -852,7 +852,7 @@ export default class ZodParser_FastestValidator implements ZodParser {
 				);
 			} else if (typeof value.contains !== "undefined") {
 				refinements = (refinements || z.any().array()).refine(
-					(data: Array<unknown>) => data.find(value.contains),
+					(data: Array<unknown>) => data.find(d => d === value.contains),
 					{ message: `Value must contain this element: ${value.contains}` }
 				);
 			}
@@ -867,7 +867,7 @@ export default class ZodParser_FastestValidator implements ZodParser {
 			// - Enum
 			if (Array.isArray(value.enum)) {
 				refinements = (refinements || z.any().array()).refine(
-					(data: Array<unknown>) => data.every(v => value.enum.find(v)),
+					(data: Array<unknown>) => data.every(d => value.enum.find(v => v === d)),
 					{
 						message: `Value must contains only enum requested values: ${value.enum.join(", ")}`
 					}
@@ -883,7 +883,7 @@ export default class ZodParser_FastestValidator implements ZodParser {
 		// Object type
 		if (value.type === "object") {
 			const properties = {};
-			const source = value.props ?? value.properties;
+			const source = value.props ?? value.properties ?? {};
 			for (const prop in source) {
 				properties[prop] = this.convert(source[prop], $$strict, $$remove);
 			}
