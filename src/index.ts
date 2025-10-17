@@ -117,7 +117,8 @@ export function McpServerMixin(
 
 				if (inBlacklist) return false;
 
-				if (action.visibility !== null && action.visibility !== "published") return false;
+				if (typeof action.visibility === "string" && action.visibility !== "published")
+					return false;
 
 				return true;
 			},
