@@ -13,7 +13,7 @@ MCP server mixin for Moleculer API Gateway (moleculer-web)
 To install the package, use the following command:
 
 ```bash
-npm i @moleculer/mcp-server moleculer-web
+npm i @moleculer/mcp-server
 ```
 
 ## Usage
@@ -21,16 +21,17 @@ npm i @moleculer/mcp-server moleculer-web
 ### Add MCP server mixin to your API Gateway service
 
 ```javascript
-import ApiGateway from "moleculer-web";
 import { McpServerMixin } from "../../src/index.js";
 
 // api.service.js
 export default {
-	name: "api",
-	mixins: [ApiGateway, McpServerMixin()],
-	settings: {
-		// Other API gateway settings...
-	}
+    name: "api",
+    mixins: [McpServerMixin()],
+    settings: {
+        mcp: {
+            whitelist: ["**"]
+        }
+    }
 };
 ```
 

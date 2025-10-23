@@ -11,23 +11,21 @@ import pkg from "../package.json";
 import { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { InMemoryEventStore } from "@modelcontextprotocol/sdk/examples/shared/inMemoryEventStore.js";
-import { ActionSchema, ServiceBroker, ServiceSchema, Utils } from "moleculer";
-import type { ApiRouteSchema, ApiSettingsSchema } from "moleculer-web";
+import { ActionSchema, ServiceBroker, Utils } from "moleculer";
 import _ from "lodash";
 import { randomUUID } from "node:crypto";
-import { McpServerSettings } from "./index.type.ts";
+import {
+	McpServerMixinOptions,
+	McpServerMixinSchema,
+	McpServerSettings
+} from "./index.type.ts";
 import { ZodParser } from "./validators/validators.types.ts";
 import getParser from "./validators/index.ts";
 import { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { ZodRawShape } from "zod";
+import ApiGateway from "moleculer-web";
 
-export interface McpServerMixinOptions {
-	routeOptions?: ApiRouteSchema;
-}
-
-export function McpServerMixin(
-	mixinOptions?: McpServerMixinOptions
-): Partial<ServiceSchema<ApiSettingsSchema>> {
+export function McpServerMixin(mixinOptions?: McpServerMixinOptions): McpServerMixinSchema {
 	mixinOptions = _.defaultsDeep(mixinOptions, {
 		routeOptions: {
 			path: "/mcp"
@@ -58,6 +56,7 @@ export function McpServerMixin(
 
 	const mcp: McpServerSettings = {
 		whitelist: [],
+		blacklist: [],
 		tools: [],
 		regenerationDebounceTime: 1000,
 		cache: {
@@ -66,6 +65,7 @@ export function McpServerMixin(
 	};
 
 	return {
+		mixins: [ApiGateway],
 		settings: {
 			mcp,
 			server: null,
@@ -229,59 +229,111 @@ export function McpServerMixin(
 			this.transports = new Map<string, StreamableHTTPServerTransport>();
 			this.settings.mcp.server = createServer(this.broker);
 
-			const route = _.defaultsDeep(mixinOptions?.routeOptions, {
-				aliases: {
-					async "POST /"(req, res) {
-						this.logger.info("Received MCP POST request");
-						try {
-							// Check for existing session ID
-							const sessionId = req.headers["mcp-session-id"] as string | undefined;
-							let transport: StreamableHTTPServerTransport;
+			// Create debounced version of the regenerate method
+			this.regenerateMcpHandlers = _.debounce(
+				this._regenerateMcpHandlers,
+				this.settings.mcp.regenerationDebounceTime
+			);
+		},
 
-							if (sessionId && this.transports.has(sessionId)) {
-								// Reuse existing transport
-								transport = this.transports.get(sessionId)!;
-							} else if (!sessionId) {
-								const { server } = this.settings.mcp.server;
+		merged(schema) {
+			if (!schema.settings) {
+				schema.settings = { routes: [] };
+			} else if (!schema.settings.routes) {
+				schema.settings.routes = [];
+			}
+			if (Array.isArray(schema.settings.routes)) {
+				const route = _.defaultsDeep(mixinOptions?.routeOptions, {
+					aliases: {
+						async "POST /"(req, res) {
+							this.logger.info("Received MCP POST request");
+							try {
+								// Check for existing session ID
+								const sessionId = req.headers["mcp-session-id"] as
+									| string
+									| undefined;
+								let transport: StreamableHTTPServerTransport;
 
-								// New initialization request
-								const eventStore = new InMemoryEventStore();
-								transport = new StreamableHTTPServerTransport({
-									sessionIdGenerator: () => randomUUID(),
-									eventStore, // Enable reusability
-									onsessioninitialized: (sessionId: string) => {
-										// Store the transport by session ID when session is initialized
-										// This avoids race conditions where requests might come in before the session is stored
-										this.logger.info(
-											`Session initialized with ID: ${sessionId}`
-										);
-										this.transports.set(sessionId, transport);
-									}
-								});
+								if (sessionId && this.transports.has(sessionId)) {
+									// Reuse existing transport
+									transport = this.transports.get(sessionId)!;
+								} else if (!sessionId) {
+									const { server } = this.settings.mcp.server;
 
-								// Set up onclose handler to clean up transport when closed
-								server.onclose = async () => {
-									const sid = transport.sessionId;
-									if (sid && this.transports.has(sid)) {
-										this.logger.info(
-											`Transport closed for session ${sid}, removing from transports map`
-										);
-										this.transports.delete(sid);
-									}
-								};
+									// New initialization request
+									const eventStore = new InMemoryEventStore();
+									transport = new StreamableHTTPServerTransport({
+										sessionIdGenerator: () => randomUUID(),
+										eventStore, // Enable reusability
+										onsessioninitialized: (sessionId: string) => {
+											// Store the transport by session ID when session is initialized
+											// This avoids race conditions where requests might come in before the session is stored
+											this.logger.info(
+												`Session initialized with ID: ${sessionId}`
+											);
+											this.transports.set(sessionId, transport);
+										}
+									});
 
-								// Connect the transport to the MCP server BEFORE handling the request
-								// so responses can flow back through the same transport
-								await server.connect(transport);
+									// Set up onclose handler to clean up transport when closed
+									server.onclose = async () => {
+										const sid = transport.sessionId;
+										if (sid && this.transports.has(sid)) {
+											this.logger.info(
+												`Transport closed for session ${sid}, removing from transports map`
+											);
+											this.transports.delete(sid);
+										}
+									};
 
+									// Connect the transport to the MCP server BEFORE handling the request
+									// so responses can flow back through the same transport
+									await server.connect(transport);
+
+									await transport.handleRequest(req, res);
+
+									return; // Already handled
+								} else {
+									// Invalid request - no session ID or not initialization request
+									this.logger.warn("Invalid MCP request:", req.headers);
+									res.statusCode = 400;
+									await this.sendResponse(req, res, 400, {
+										jsonrpc: "2.0",
+										error: {
+											code: -32000,
+											message: "Bad Request: No valid session ID provided"
+										},
+										id: req?.body?.id
+									});
+									return;
+								}
+
+								// Handle the request with existing transport - no need to reconnect
+								// The existing transport is already connected to the server
 								await transport.handleRequest(req, res);
+							} catch (error) {
+								this.logger.error("Error handling MCP request:", error);
+								if (!res.headersSent) {
+									res.statusCode = 500;
+									await this.sendResponse(req, res, {
+										jsonrpc: "2.0",
+										error: {
+											code: -32603,
+											message: "Internal server error"
+										},
+										id: req?.body?.id
+									});
+									return;
+								}
+							}
+						},
 
-								return; // Already handled
-							} else {
-								// Invalid request - no session ID or not initialization request
-								this.logger.warn("Invalid MCP request:", req.headers);
+						async "GET /"(req, res) {
+							this.logger.info("Received MCP GET request");
+							const sessionId = req.headers["mcp-session-id"] as string | undefined;
+							if (!sessionId || !this.transports.has(sessionId)) {
 								res.statusCode = 400;
-								await this.sendResponse(req, res, 400, {
+								await this.sendResponse(req, res, {
 									jsonrpc: "2.0",
 									error: {
 										code: -32000,
@@ -292,113 +344,71 @@ export function McpServerMixin(
 								return;
 							}
 
-							// Handle the request with existing transport - no need to reconnect
-							// The existing transport is already connected to the server
-							await transport.handleRequest(req, res);
-						} catch (error) {
-							this.logger.error("Error handling MCP request:", error);
-							if (!res.headersSent) {
-								res.statusCode = 500;
-								await this.sendResponse(req, res, {
-									jsonrpc: "2.0",
-									error: {
-										code: -32603,
-										message: "Internal server error"
-									},
-									id: req?.body?.id
-								});
-								return;
+							// Check for Last-Event-ID header for reusability
+							const lastEventId = req.headers["last-event-id"] as string | undefined;
+							if (lastEventId) {
+								this.logger.info(
+									`Client reconnecting with Last-Event-ID: ${lastEventId}`
+								);
+							} else {
+								this.logger.info(
+									`Establishing new MCP SSE stream for session ${sessionId}`
+								);
 							}
-						}
-					},
 
-					async "GET /"(req, res) {
-						this.logger.info("Received MCP GET request");
-						const sessionId = req.headers["mcp-session-id"] as string | undefined;
-						if (!sessionId || !this.transports.has(sessionId)) {
-							res.statusCode = 400;
-							await this.sendResponse(req, res, {
-								jsonrpc: "2.0",
-								error: {
-									code: -32000,
-									message: "Bad Request: No valid session ID provided"
-								},
-								id: req?.body?.id
-							});
-							return;
-						}
-
-						// Check for Last-Event-ID header for reusability
-						const lastEventId = req.headers["last-event-id"] as string | undefined;
-						if (lastEventId) {
-							this.logger.info(
-								`Client reconnecting with Last-Event-ID: ${lastEventId}`
-							);
-						} else {
-							this.logger.info(
-								`Establishing new MCP SSE stream for session ${sessionId}`
-							);
-						}
-
-						const transport = this.transports.get(sessionId);
-						await transport!.handleRequest(req, res);
-					},
-
-					async "DELETE /"(req, res) {
-						const sessionId = req.headers["mcp-session-id"] as string | undefined;
-						if (!sessionId || !this.transports.has(sessionId)) {
-							res.statusCode = 400;
-							await this.sendResponse(req, res, {
-								jsonrpc: "2.0",
-								error: {
-									code: -32000,
-									message: "Bad Request: No valid session ID provided"
-								},
-								id: req?.body?.id
-							});
-							return;
-						}
-
-						this.logger.info(
-							`Received session termination request for session ${sessionId}`
-						);
-
-						try {
 							const transport = this.transports.get(sessionId);
 							await transport!.handleRequest(req, res);
-						} catch (error) {
-							this.logger.error("Error handling session termination:", error);
-							if (!res.headersSent) {
-								res.statusCode = 500;
+						},
+
+						async "DELETE /"(req, res) {
+							const sessionId = req.headers["mcp-session-id"] as string | undefined;
+							if (!sessionId || !this.transports.has(sessionId)) {
+								res.statusCode = 400;
 								await this.sendResponse(req, res, {
 									jsonrpc: "2.0",
 									error: {
-										code: -32603,
-										message: "Error handling session termination"
+										code: -32000,
+										message: "Bad Request: No valid session ID provided"
 									},
 									id: req?.body?.id
 								});
 								return;
 							}
+
+							this.logger.info(
+								`Received session termination request for session ${sessionId}`
+							);
+
+							try {
+								const transport = this.transports.get(sessionId);
+								await transport!.handleRequest(req, res);
+							} catch (error) {
+								this.logger.error("Error handling session termination:", error);
+								if (!res.headersSent) {
+									res.statusCode = 500;
+									await this.sendResponse(req, res, {
+										jsonrpc: "2.0",
+										error: {
+											code: -32603,
+											message: "Error handling session termination"
+										},
+										id: req?.body?.id
+									});
+									return;
+								}
+							}
 						}
+					},
+
+					mappingPolicy: "restrict",
+
+					bodyParsers: {
+						json: false // The mcp server will read the raw body itself
 					}
-				},
+				});
 
-				mappingPolicy: "restrict",
-
-				bodyParsers: {
-					json: false // The mcp server will read the raw body itself
-				}
-			});
-
-			// Add route
-			this.settings.routes.unshift(route);
-
-			// Create debounced version of the regenerate method
-			this.regenerateMcpHandlers = _.debounce(
-				this._regenerateMcpHandlers,
-				this.settings.mcp.regenerationDebounceTime
-			);
+				schema.settings.routes.unshift(route);
+			}
 		},
 
 		started() {
@@ -421,5 +431,5 @@ export function McpServerMixin(
 
 			this.logger.info("Server shutdown complete");
 		}
-	};
+	} as McpServerMixinSchema;
 }

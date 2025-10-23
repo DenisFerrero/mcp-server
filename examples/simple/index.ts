@@ -6,7 +6,6 @@
  */
 
 import { ServiceBroker } from "moleculer";
-import ApiGateway from "moleculer-web";
 import { McpServerMixin } from "../../src/index.ts";
 import url from "url";
 import path from "path";
@@ -23,7 +22,7 @@ const broker = new ServiceBroker();
 
 broker.createService({
 	name: "api",
-	mixins: [ApiGateway, McpServerMixin()],
+	mixins: [McpServerMixin()],
 	settings: {
 		port: 3300,
 		mcp: {

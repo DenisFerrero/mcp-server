@@ -1,4 +1,6 @@
 import { RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { ServiceSchema } from "moleculer";
+import { ApiRouteSchema, ApiSettingsSchema } from "moleculer-web";
 import z from "zod";
 
 // Convert a moleculer action into a tool
@@ -51,3 +53,13 @@ export interface McpServerSettings {
 		tools: Array<RegisteredTool>;
 	};
 }
+
+export interface McpServerMixinOptions {
+	routeOptions?: ApiRouteSchema;
+}
+
+export type McpServerMixinSchema = Partial<
+	ServiceSchema<ApiSettingsSchema> & {
+		merged?: (data: McpServerMixinSchema) => void;
+	}
+>;
