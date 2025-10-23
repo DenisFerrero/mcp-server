@@ -8,7 +8,7 @@
 
 import pkg from "../package.json";
 
-import { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, RegisteredTool, ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { InMemoryEventStore } from "@modelcontextprotocol/sdk/examples/shared/inMemoryEventStore.js";
 import { ActionSchema, ServiceBroker, Utils } from "moleculer";
@@ -17,6 +17,7 @@ import { randomUUID } from "node:crypto";
 import {
 	McpServerMixinOptions,
 	McpServerMixinSchema,
+	McpServerSetting_CustomTool,
 	McpServerSettings
 } from "./index.type.ts";
 import { ZodParser } from "./validators/validators.types.ts";
@@ -158,14 +159,60 @@ export function McpServerMixin(mixinOptions?: McpServerMixinOptions): McpServerM
 				for (const tool of this.settings.mcp.cache.tools as Array<RegisteredTool>) {
 					tool.remove();
 				}
+
 				this.settings.mcp.cache.tools = [];
 
 				// TODO Find a way to detect the validator used for each service's action
 				const parser: ZodParser = getParser("FastestValidator");
 
+				// Custom actions
+				for (const _tool of this.settings.mcp.tools as Array<McpServerSetting_CustomTool>) {
+					const handler: ToolCallback<ZodRawShape> = async (args: {
+						[x: string]: unknown;
+					}) => {
+						let result;
+						if (typeof _tool.handler === "function") {
+							result = await _tool.handler(this.broker, args);
+						} else if (typeof _tool.handler === "string") {
+							result = await (this.broker as ServiceBroker).call(_tool.handler, args);
+						} else {
+							throw new Error("Invalid handler!");
+						}
+
+						return {
+							content: [
+								{
+									type: "text",
+									text: JSON.stringify(result, null, 2)
+								}
+							]
+						};
+					};
+
+					const tool = (this.settings.mcp.server as McpServer).registerTool(
+						_tool.name,
+						{
+							title: _tool.title ?? "",
+							description: _tool.description,
+							inputSchema: _tool.input,
+							outputSchema: _tool.output,
+							annotations: _tool.annotations
+						},
+						handler
+					);
+
+					this.logger.info(
+						`[MCP tool] ${_tool.title} => ${typeof _tool.handler === "string" ? _tool.handler : "<Function>"}`
+					);
+
+					this.settings.mcp.cache.tools.push(tool);
+				}
+				// Action whitelist
 				for (const action of actions) {
 					if (this.isTool(action.action)) {
-						const toolName: string = this.normalizeMcpActionName(action.name);
+						const toolName: string =
+							(action.action["metadata"]?.name as string) ??
+							this.normalizeMcpActionName(action.name);
 						const toolTitle: string =
 							(action.action["metadata"]?.title as string) ??
 							this.humanizeMcpActionName(action.name);

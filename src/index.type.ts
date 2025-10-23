@@ -1,36 +1,25 @@
 import { RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ServiceSchema } from "moleculer";
+import { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
+import { ServiceBroker, ServiceSchema } from "moleculer";
 import { ApiRouteSchema, ApiSettingsSchema } from "moleculer-web";
 import z from "zod";
 
 // Convert a moleculer action into a tool
-export interface McpServerSetting_ActionTool {
-	// Name of the tool
-	name: string;
-	// Brief title
-	title: string;
-	// Deep description, if not provided use the one declared in the action (if any)
-	description?: string;
-	// Action to call
-	action: string;
-	// Parameters validation, if none compile the action parameters
-	input?: Record<string, z.ZodTypeAny>;
-	// Output format
-	output?: z.ZodTypeAny;
-}
-
-// Declare a custom function as handler for a tool
 export interface McpServerSetting_CustomTool {
 	// Name of the tool
 	name: string;
 	// Brief title
-	title: string;
+	title?: string;
 	// Deep description
 	description: string;
-	// Parameters validation
-	input: Record<string, z.ZodTypeAny>;
+	// Action or function to call
+	handler: string | ((broker: ServiceBroker, params: object) => object);
+	// Parameters validation, if none compile the action parameters
+	input?: Record<string, z.ZodTypeAny>;
 	// Output format
-	output?: z.ZodTypeAny;
+	output?: z.ZodRawShape;
+	// Annotations
+	annotations: ToolAnnotations;
 }
 
 export interface McpServerSettings {
@@ -43,7 +32,7 @@ export interface McpServerSettings {
 	 */
 	blacklist?: Array<string | RegExp>;
 
-	tools?: Array<McpServerSetting_ActionTool | McpServerSetting_CustomTool>;
+	tools?: Array<McpServerSetting_CustomTool>;
 	/**
 	 * Regeneration is debounced for X time to prevent continuous update to the MCP server
 	 */

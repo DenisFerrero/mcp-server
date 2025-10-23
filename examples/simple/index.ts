@@ -16,6 +16,7 @@ if (!dirname) {
 }
 
 import process from "node:process";
+import { ProductEntity } from "./products.service.ts";
 
 // Create broker
 const broker = new ServiceBroker();
@@ -26,7 +27,18 @@ broker.createService({
 	settings: {
 		port: 3300,
 		mcp: {
-			whitelist: ["products.*"]
+			whitelist: ["products.*"],
+			tools: [
+				{
+					name: "get_total_products",
+					title: "Get total quantities of products",
+					description: "Get total amount of products in stock",
+					async handler(broker: ServiceBroker, params: object) {
+						const products: Array<ProductEntity> = await broker.call("products.find");
+						return products.reduce((acc, curr) => acc + curr.quantity, 0);
+					}
+				}
+			]
 		}
 	}
 });

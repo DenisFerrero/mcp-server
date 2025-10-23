@@ -76,6 +76,12 @@ const ProductsService: ServiceSchema<ProductSettings, DatabaseMethods> = {
 				id: "string",
 				value: "number|integer|positive"
 			},
+			metadata: {
+				name: "increase_product_quantity",
+				title: "Increase product quantity",
+				description:
+					"Increase product quantity by passing the ID of the product and the amount (value parameter)"
+			},
 			async handler(ctx: Context<ActionQuantityParams>): Promise<ProductEntity> {
 				// Get current quantity
 				const adapter = await this.getAdapter(ctx);
