@@ -16,7 +16,9 @@ Expose your Moleculer microservices to AI assistants (Claude, GPT, etc.) via the
 - **Schema conversion** — fastest-validator params are converted to Zod schemas automatically
 - **Tool annotations** — REST method-based auto-detection of `readOnlyHint`, `destructiveHint`, `idempotentHint`
 - **Service filtering** — Whitelist services or exclude specific actions via glob patterns
-- **MCP metadata** — Fine-grained control over tool name, description, and annotations per action
+- **MCP metadata** — Fine-grained control over tool name, title, description, and annotations per action
+- **Custom tools** — Declare extra tools with Zod input/output schemas, backed by an action or a function
+- **Dynamic refresh** — Open sessions get the tools of services started after they connected
 - **Built-in broker tools** — List nodes, services, actions, events + generic call/emit tools
 - **Streamable HTTP transport** — Standards-compliant MCP server with session management and resumability
 
@@ -80,7 +82,13 @@ This automatically generates an MCP tool:
 
 Tool names are derived from the action name by replacing dots with underscores: `service.action` → `service_action`.
 
-Internal actions (prefixed with `$`) are always excluded.
+Internal actions (prefixed with `$`) are always excluded, and so are actions whose `visibility` is not `"published"` (the default), as in the API gateway.
+
+Params declared with `$$root: true` are exposed as a single `$$root` argument and unwrapped before calling the action.
+
+### Dynamic refresh
+
+When services join or leave the cluster (`$services.changed`), the auto-discovered tools of every open MCP session are regenerated and the clients receive a `notifications/tools/list_changed` notification. The refresh is debounced by `refreshDebounceTime` (default `1000` ms); set it to `false` to keep the tools fixed for the whole session.
 
 ## Configuration Options
 
@@ -105,7 +113,14 @@ McpServerMixin({
   // Prefix for auto-generated tool names
   // Default: "" (no prefix)
   // Example: "mol_" → tool name: "mol_weather_forecast"
-  toolNamePrefix: ""
+  toolNamePrefix: "",
+
+  // Manually declared tools (see "Custom tools")
+  tools: [],
+
+  // Debounce time (ms) of the tools refresh when services change, false to disable
+  // Default: 1000
+  refreshDebounceTime: 1000
 })
 ```
 
@@ -116,6 +131,45 @@ McpServerMixin({
 | `excludeActions` | `string[]` | `undefined` | Action name patterns to exclude |
 | `exposeBrokerTools` | `boolean` | `true` | Whether to register built-in broker tools |
 | `toolNamePrefix` | `string` | `""` | Prefix for auto-generated tool names |
+| `tools` | `McpCustomTool[]` | `[]` | Manually declared tools |
+| `refreshDebounceTime` | `number \| false` | `1000` | Debounce of the tools refresh on `$services.changed`, `false` to disable |
+
+If two tools end up with the same name (e.g. two actions with the same `mcp.name`), the first registered one wins and the others are skipped with a warning. Registration order: broker tools, custom tools, auto-discovered tools.
+
+## Custom tools
+
+Tools that don't map 1:1 to an action can be declared with the `tools` option. `input` and `output` are Zod raw shapes; `handler` is either an action name (called with the tool params) or a function `(params, broker)`.
+
+```javascript
+import { z } from "zod";
+
+McpServerMixin({
+  tools: [
+    {
+      name: "sum",
+      title: "Sum",
+      description: "Sum two numbers",
+      input: {
+        a: z.number().describe("First number"),
+        b: z.number().describe("Second number")
+      },
+      output: {
+        total: z.number().describe("Result")
+      },
+      handler: params => ({ total: params.a + params.b }),
+      annotations: { readOnlyHint: true, idempotentHint: true }
+    },
+    {
+      name: "create_product",
+      description: "Create a new product",
+      input: { name: z.string(), price: z.number() },
+      handler: "products.create"
+    }
+  ]
+})
+```
+
+When `output` is set, the result is also returned as `structuredContent` (required by the MCP spec) and must match the schema. Errors thrown by the handler are returned as tool errors (`isError: true`).
 
 ## Action Description & MCP Metadata
 
@@ -148,6 +202,8 @@ actions: {
       description: "Get detailed weather forecast",
       // Override the tool name (default: service_action)
       name: "get_forecast",
+      // Override the tool title (default: "Call service.action")
+      title: "Weather forecast",
       // Explicit annotations (overrides auto-detection)
       annotations: { readOnlyHint: true },
       // Enable/disable this tool (default: true)
@@ -214,7 +270,17 @@ The mixin automatically converts fastest-validator parameter schemas to Zod sche
 | `{ type: "string", optional: true }` | `z.string().optional()` |
 | `{ type: "number", default: 5 }` | `z.number().default(5)` |
 | `"number\|integer\|positive"` (pipe syntax) | `z.number().int().positive()` |
+| `"string\|min:3\|max:10"` (pipe syntax with options) | `z.string().min(3).max(10)` |
+| `"uuid"` | `z.string().uuid()` |
+| `{ type: "string", nullable: true }` | `z.string().nullable()` |
+| `{ type: "string", description: "..." }` | `z.string().describe("...")` |
+| `{ type: "string", length: 3 }` / `empty: false` | `z.string().length(3)` / `.min(1)` |
+| `{ type: "array", items: "string", min: 1, max: 5 }` | `z.array(z.string()).min(1).max(5)` |
+| `{ type: "object", properties: { ... } }` | same as `props` |
+| `{ type: "multi", rules: ["string", "number"] }` or `["string", "number"]` | `z.union([z.string(), z.number()])` |
 | Unknown/custom type | `z.any()` |
+
+The Zod schema is used to describe the tool to the LLM (as JSON Schema): the real validation is still done by the action's validator when it is called. Rules that can't be expressed in JSON Schema (e.g. `trim`, `convert`, custom `check` functions) are therefore not converted.
 
 ## Built-in Tools
 

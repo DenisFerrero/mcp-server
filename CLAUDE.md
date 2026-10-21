@@ -6,14 +6,19 @@ MCP server mixin for Moleculer API Gateway. Exposes Moleculer microservice actio
 
 ```
 src/
-  index.ts              # Main export: McpServerMixin() function
-  types.ts              # TypeScript interfaces (McpServerMixinOptions)
+  index.ts              # Main export: McpServerMixin() function, sessions, tools refresh
+  types.ts              # TypeScript interfaces (McpServerMixinOptions, McpCustomTool)
   schema-converter.ts   # fastest-validator → Zod schema conversion
   tool-generator.ts     # Auto-discovery: action registry → MCP tool registration
+  custom-tools.ts       # Registration of the `tools` option
+  utils.ts              # Tool result helpers (toTextResult, toErrorResult)
+  version.ts            # Package version (kept in sync with package.json by a test)
 test/
   index.test.ts         # Integration tests (MCP client ↔ server)
   schema-converter.test.ts  # Schema conversion unit tests
   auto-discovery.test.ts    # Auto-discovery integration tests
+  custom-tools-refresh.test.ts  # Custom tools and dynamic refresh tests
+  version.test.ts       # VERSION ↔ package.json check
   mcp-client.ts         # Test MCP client helper
 examples/
   index.ts              # Entry point (module selector)
@@ -50,6 +55,8 @@ npm run dev       # nodemon with MCP inspector
 - `excludeActions` — `string[]` — action name patterns to exclude
 - `exposeBrokerTools` — `boolean` (default: `true`) — show/hide list_nodes, list_services, etc.
 - `toolNamePrefix` — `string` (default: `""`) — prefix for auto-generated tool names
+- `tools` — `McpCustomTool[]` (default: `[]`) — manually declared tools
+- `refreshDebounceTime` — `number | false` (default: `1000`) — debounce of the tools refresh on `$services.changed`
 
 ## Tech Stack
 
