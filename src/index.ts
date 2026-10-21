@@ -8,7 +8,7 @@
 
 import pkg from "../package.json";
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { InMemoryEventStore } from "@modelcontextprotocol/sdk/examples/shared/inMemoryEventStore.js";
 import { ServiceBroker, ServiceSchema } from "moleculer";
@@ -16,12 +16,19 @@ import type { ApiSettingsSchema } from "moleculer-web";
 import _ from "lodash";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import type { McpServerMixinOptions } from "./types.js";
+import type { McpCustomTool, McpServerMixinOptions } from "./types.js";
 import { registerAutoDiscoveryTools } from "./tool-generator.js";
+import { registerCustomTools } from "./custom-tools.js";
 import { toErrorResult, toTextResult } from "./utils.js";
 import "./moleculer-types.js";
 
-export type { McpServerMixinOptions };
+export type { McpCustomTool, McpServerMixinOptions };
+
+/** An open MCP session: its server and the auto-discovered tools registered on it */
+interface McpSession {
+	server: McpServer;
+	autoTools: RegisteredTool[];
+}
 
 export function McpServerMixin(
 	mixinOptions?: McpServerMixinOptions
@@ -31,7 +38,9 @@ export function McpServerMixin(
 			path: "/mcp"
 		},
 		exposeBrokerTools: true,
-		toolNamePrefix: ""
+		toolNamePrefix: "",
+		tools: [],
+		refreshDebounceTime: 1000
 	});
 
 	function createServer(broker: ServiceBroker) {
@@ -46,7 +55,7 @@ export function McpServerMixin(
 			},
 			{
 				capabilities: {
-					tools: {}
+					tools: { listChanged: true }
 				}
 			}
 		);
@@ -358,16 +367,51 @@ export function McpServerMixin(
 			}
 		);
 
-		// Auto-discovery: register per-action tools (after the broker tools, so a clashing
-		// action tool name is skipped instead of breaking the session)
-		registerAutoDiscoveryTools(server, broker, mixinOptions!);
+		// Custom tools take precedence over the auto-discovered ones
+		registerCustomTools(server, broker, mixinOptions!.tools ?? []);
 
-		return server;
+		// Auto-discovery: register per-action tools (after the other tools, so a clashing
+		// action tool name is skipped instead of breaking the session)
+		const autoTools = registerAutoDiscoveryTools(server, broker, mixinOptions!);
+
+		return { server, autoTools };
 	}
 
 	return {
+		events: {
+			"$services.changed"() {
+				this.debouncedRefreshMcpTools?.();
+			}
+		},
+
+		methods: {
+			/**
+			 * Re-generate the auto-discovered tools of every open session, so the clients
+			 * see the actions of services started (or stopped) after the session was opened.
+			 * The SDK notifies the clients with `notifications/tools/list_changed`.
+			 */
+			refreshMcpTools() {
+				for (const session of this.mcpSessions as Set<McpSession>) {
+					for (const tool of session.autoTools) tool.remove();
+					session.autoTools = registerAutoDiscoveryTools(
+						session.server,
+						this.broker,
+						mixinOptions!
+					);
+				}
+			}
+		},
+
 		created() {
 			this.transports = new Map<string, StreamableHTTPServerTransport>();
+			this.mcpSessions = new Set<McpSession>();
+
+			if (mixinOptions!.refreshDebounceTime !== false) {
+				this.debouncedRefreshMcpTools = _.debounce(
+					() => this.refreshMcpTools(),
+					mixinOptions!.refreshDebounceTime
+				);
+			}
 
 			const route = _.defaultsDeep(mixinOptions?.routeOptions, {
 				aliases: {
@@ -382,7 +426,8 @@ export function McpServerMixin(
 								// Reuse existing transport
 								transport = this.transports.get(sessionId)!;
 							} else {
-								const { server } = createServer(this.broker);
+								const session: McpSession = createServer(this.broker);
+								const { server } = session.server;
 
 								// New initialization request (no session ID or unknown session ID)
 								const eventStore = new InMemoryEventStore();
@@ -396,11 +441,13 @@ export function McpServerMixin(
 											`Session initialized with ID: ${sessionId}`
 										);
 										this.transports.set(sessionId, transport);
+										this.mcpSessions.add(session);
 									}
 								});
 
 								// Set up onclose handler to clean up transport when closed
 								server.onclose = async () => {
+									this.mcpSessions.delete(session);
 									const sid = transport.sessionId;
 									if (sid && this.transports.has(sid)) {
 										this.logger.info(
@@ -556,6 +603,8 @@ export function McpServerMixin(
 
 		async stopped() {
 			this.logger.info("Shutting down server...");
+
+			this.debouncedRefreshMcpTools?.cancel();
 
 			// Close all active transports to properly clean up resources
 			for (const [sessionId, transport] of this.transports) {
