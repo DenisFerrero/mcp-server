@@ -472,6 +472,57 @@ export function McpServerMixin(
 				return true;
 			},
 
+			/**
+			 * Stateless mode: a new server and transport for each request, closed when the
+			 * response ends. No session is kept, so any gateway instance can serve any request.
+			 */
+			async handleStatelessMcpRequest(req, res) {
+				const { server } = createServer(this.broker);
+				const transport = new StreamableHTTPServerTransport({
+					sessionIdGenerator: undefined
+				});
+				res.once("close", () => {
+					transport.close().catch(() => {});
+					server.close().catch(() => {});
+				});
+				try {
+					await server.connect(transport);
+					this.attachMcpMeta(req);
+					await transport.handleRequest(req, res);
+				} catch (error) {
+					this.logger.error("Error handling stateless MCP request:", error);
+					if (!res.headersSent) {
+						res.statusCode = 500;
+						await this.sendResponse(
+							req,
+							res,
+							{
+								jsonrpc: "2.0",
+								error: { code: -32603, message: "Internal server error" },
+								id: null
+							},
+							{}
+						);
+					}
+				}
+			},
+
+			/** In stateless mode there are no SSE streams (GET) or sessions to terminate (DELETE) */
+			async rejectStatelessMcpMethod(req, res) {
+				res.statusCode = 405;
+				res.setHeader("Allow", "POST");
+				await this.sendResponse(
+					req,
+					res,
+					{
+						jsonrpc: "2.0",
+						error: { code: -32000, message: "Method not allowed in stateless mode" },
+						id: null
+					},
+					{}
+				);
+			},
+
 			attachMcpMeta(req) {
 				const meta = _.pick(req.$ctx?.meta ?? {}, mixinOptions!.forwardMeta ?? []);
 				if (_.isEmpty(meta)) return;
@@ -553,6 +604,8 @@ export function McpServerMixin(
 					async "POST /"(req, res) {
 						this.logger.debug("Received MCP POST request");
 						if (await this.rejectInvalidMcpHeaders(req, res)) return;
+						if (mixinOptions!.stateless)
+							return this.handleStatelessMcpRequest(req, res);
 						try {
 							// Check for existing session ID
 							const sessionId = req.headers["mcp-session-id"] as string | undefined;
@@ -637,6 +690,7 @@ export function McpServerMixin(
 					async "GET /"(req, res) {
 						this.logger.debug("Received MCP GET request");
 						if (await this.rejectInvalidMcpHeaders(req, res)) return;
+						if (mixinOptions!.stateless) return this.rejectStatelessMcpMethod(req, res);
 						const sessionId = req.headers["mcp-session-id"] as string | undefined;
 						if (!sessionId || !this.transports.has(sessionId)) {
 							res.statusCode = 400;
@@ -676,6 +730,7 @@ export function McpServerMixin(
 
 					async "DELETE /"(req, res) {
 						if (await this.rejectInvalidMcpHeaders(req, res)) return;
+						if (mixinOptions!.stateless) return this.rejectStatelessMcpMethod(req, res);
 						const sessionId = req.headers["mcp-session-id"] as string | undefined;
 						if (!sessionId || !this.transports.has(sessionId)) {
 							res.statusCode = 400;

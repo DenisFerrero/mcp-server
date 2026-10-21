@@ -97,6 +97,14 @@ export interface McpServerMixinOptions {
 	 */
 	maxResultLength?: number;
 
+	/**
+	 * Stateless mode: each POST request gets a new MCP server, no session is kept and GET/DELETE
+	 * are rejected with 405. Use it to run several gateway instances without sticky sessions.
+	 * Server-to-client notifications (e.g. `tools/list_changed`) and SSE resumability are not
+	 * available. Default: false
+	 */
+	stateless?: boolean;
+
 	/** Max number of SSE events kept in memory per session for resumability. Default: 1000 */
 	maxStoredEvents?: number;
 
