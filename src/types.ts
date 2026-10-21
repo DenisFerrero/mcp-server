@@ -72,4 +72,13 @@ export interface McpServerMixinOptions {
 	 * `user` set by the moleculer-web `authenticate` method of the route. Default: ["user"]
 	 */
 	forwardMeta?: string[];
+
+	/**
+	 * Close the sessions idle for this time (ms): no requests and no open SSE stream, e.g.
+	 * clients gone away without a DELETE request. Set `false` to disable. Default: 30 minutes
+	 */
+	sessionTimeout?: number | false;
+
+	/** Max number of SSE events kept in memory per session for resumability. Default: 1000 */
+	maxStoredEvents?: number;
 }

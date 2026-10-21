@@ -10,7 +10,6 @@ import { VERSION } from "./version.js";
 
 import { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { InMemoryEventStore } from "@modelcontextprotocol/sdk/examples/shared/inMemoryEventStore.js";
 import { ServiceBroker, ServiceSchema } from "moleculer";
 import type { ApiSettingsSchema } from "moleculer-web";
 import _ from "lodash";
@@ -19,6 +18,7 @@ import { z } from "zod";
 import type { McpCustomTool, McpServerMixinOptions } from "./types.js";
 import { isActionExposed, registerAutoDiscoveryTools } from "./tool-generator.js";
 import { registerCustomTools } from "./custom-tools.js";
+import { BoundedEventStore } from "./event-store.js";
 import { getForwardedMeta, MCP_META_KEY, toErrorResult, toTextResult } from "./utils.js";
 import "./moleculer-types.js";
 
@@ -27,7 +27,12 @@ export type { McpCustomTool, McpServerMixinOptions };
 /** An open MCP session: its server and the auto-discovered tools registered on it */
 interface McpSession {
 	server: McpServer;
+	transport?: StreamableHTTPServerTransport;
 	autoTools: RegisteredTool[];
+	/** Timestamp of the last request, used to close idle sessions */
+	lastActivity: number;
+	/** Requests in progress, incl. open SSE (GET) streams: a busy session is never idle */
+	openStreams: number;
 }
 
 export function McpServerMixin(
@@ -42,7 +47,9 @@ export function McpServerMixin(
 		toolNamePrefix: "",
 		tools: [],
 		refreshDebounceTime: 1000,
-		forwardMeta: ["user"]
+		forwardMeta: ["user"],
+		sessionTimeout: 30 * 60 * 1000,
+		maxStoredEvents: 1000
 	});
 
 	function createServer(broker: ServiceBroker) {
@@ -394,7 +401,7 @@ export function McpServerMixin(
 		// action tool name is skipped instead of breaking the session)
 		const autoTools = registerAutoDiscoveryTools(server, broker, mixinOptions!);
 
-		return { server, autoTools };
+		return { server, autoTools, lastActivity: Date.now(), openStreams: 0 };
 	}
 
 	return {
@@ -428,7 +435,7 @@ export function McpServerMixin(
 			 * The SDK notifies the clients with `notifications/tools/list_changed`.
 			 */
 			refreshMcpTools() {
-				for (const session of this.mcpSessions as Set<McpSession>) {
+				for (const session of (this.mcpSessions as Map<string, McpSession>).values()) {
 					for (const tool of session.autoTools) tool.remove();
 					session.autoTools = registerAutoDiscoveryTools(
 						session.server,
@@ -436,12 +443,48 @@ export function McpServerMixin(
 						mixinOptions!
 					);
 				}
+			},
+
+			/**
+			 * Track a request of a session until its response is closed (for SSE streams,
+			 * until the client disconnects), so busy sessions are not closed as idle.
+			 */
+			trackMcpRequest(sessionId: string, res) {
+				const session: McpSession | undefined = this.mcpSessions.get(sessionId);
+				if (!session) return;
+				session.openStreams++;
+				session.lastActivity = Date.now();
+				res.once("close", () => {
+					session.openStreams--;
+					session.lastActivity = Date.now();
+				});
+			},
+
+			/**
+			 * Close the sessions without open SSE streams and without requests for
+			 * `sessionTimeout` ms, e.g. clients gone away without a DELETE request.
+			 */
+			async closeIdleMcpSessions() {
+				const now = Date.now();
+				for (const [sessionId, session] of this.mcpSessions as Map<string, McpSession>) {
+					if (session.openStreams > 0) continue;
+					if (now - session.lastActivity < (mixinOptions!.sessionTimeout as number))
+						continue;
+
+					this.logger.info(`Closing idle MCP session ${sessionId}`);
+					try {
+						// Triggers `server.onclose`, which removes the session
+						await session.transport!.close();
+					} catch (error) {
+						this.logger.error(`Error closing idle session ${sessionId}:`, error);
+					}
+				}
 			}
 		},
 
 		created() {
 			this.transports = new Map<string, StreamableHTTPServerTransport>();
-			this.mcpSessions = new Set<McpSession>();
+			this.mcpSessions = new Map<string, McpSession>();
 
 			if (mixinOptions!.refreshDebounceTime !== false) {
 				this.debouncedRefreshMcpTools = _.debounce(
@@ -462,12 +505,15 @@ export function McpServerMixin(
 							if (sessionId && this.transports.has(sessionId)) {
 								// Reuse existing transport
 								transport = this.transports.get(sessionId)!;
+								this.trackMcpRequest(sessionId, res);
 							} else {
 								const session: McpSession = createServer(this.broker);
 								const { server } = session.server;
 
 								// New initialization request (no session ID or unknown session ID)
-								const eventStore = new InMemoryEventStore();
+								const eventStore = new BoundedEventStore(
+									mixinOptions!.maxStoredEvents!
+								);
 								transport = new StreamableHTTPServerTransport({
 									sessionIdGenerator: () => randomUUID(),
 									eventStore, // Enable resumability
@@ -478,14 +524,16 @@ export function McpServerMixin(
 											`Session initialized with ID: ${sessionId}`
 										);
 										this.transports.set(sessionId, transport);
-										this.mcpSessions.add(session);
+										this.mcpSessions.set(sessionId, session);
 									}
 								});
 
 								// Set up onclose handler to clean up transport when closed
+								session.transport = transport;
+
 								server.onclose = async () => {
-									this.mcpSessions.delete(session);
 									const sid = transport.sessionId;
+									if (sid) this.mcpSessions.delete(sid);
 									if (sid && this.transports.has(sid)) {
 										this.logger.info(
 											`Transport closed for session ${sid}, removing from transports map`
@@ -564,6 +612,7 @@ export function McpServerMixin(
 						}
 
 						const transport = this.transports.get(sessionId);
+						this.trackMcpRequest(sessionId, res);
 						this.attachMcpMeta(req);
 						await transport!.handleRequest(req, res);
 					},
@@ -642,8 +691,21 @@ export function McpServerMixin(
 			this.settings.routes.unshift(route);
 		},
 
+		started() {
+			if (mixinOptions!.sessionTimeout !== false) {
+				const timeout = mixinOptions!.sessionTimeout!;
+				this.mcpIdleTimer = setInterval(
+					() => this.closeIdleMcpSessions(),
+					Math.min(timeout, 60 * 1000)
+				);
+				this.mcpIdleTimer.unref?.();
+			}
+		},
+
 		async stopped() {
 			this.logger.info("Shutting down server...");
+
+			clearInterval(this.mcpIdleTimer);
 
 			this.debouncedRefreshMcpTools?.cancel();
 
