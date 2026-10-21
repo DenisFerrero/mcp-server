@@ -19,7 +19,7 @@ import { z } from "zod";
 import type { McpCustomTool, McpServerMixinOptions } from "./types.js";
 import { registerAutoDiscoveryTools } from "./tool-generator.js";
 import { registerCustomTools } from "./custom-tools.js";
-import { toErrorResult, toTextResult } from "./utils.js";
+import { getForwardedMeta, MCP_META_KEY, toErrorResult, toTextResult } from "./utils.js";
 import "./moleculer-types.js";
 
 export type { McpCustomTool, McpServerMixinOptions };
@@ -40,7 +40,8 @@ export function McpServerMixin(
 		exposeBrokerTools: true,
 		toolNamePrefix: "",
 		tools: [],
-		refreshDebounceTime: 1000
+		refreshDebounceTime: 1000,
+		forwardMeta: ["user"]
 	});
 
 	function createServer(broker: ServiceBroker) {
@@ -275,7 +276,7 @@ export function McpServerMixin(
 					openWorldHint: true
 				}
 			} as any,
-			async (params: Record<string, any>) => {
+			async (params: Record<string, any>, extra) => {
 				logger.info("Calling Moleculer action...", params);
 				if (!params.action) {
 					throw new Error("action parameter is required");
@@ -293,7 +294,9 @@ export function McpServerMixin(
 					}
 				}
 				try {
-					const result = await broker.call(params.action, actionParams);
+					const result = await broker.call(params.action, actionParams, {
+						meta: getForwardedMeta(extra)
+					});
 					return toTextResult(result);
 				} catch (err) {
 					logger.error("Error calling action:", err);
@@ -329,7 +332,7 @@ export function McpServerMixin(
 					openWorldHint: true
 				}
 			} as any,
-			async (params: Record<string, any>) => {
+			async (params: Record<string, any>, extra) => {
 				logger.info("Emitting Moleculer event...", params);
 				if (!params.event) {
 					throw new Error("event parameter is required");
@@ -347,10 +350,11 @@ export function McpServerMixin(
 					}
 				}
 				try {
+					const opts = { meta: getForwardedMeta(extra) };
 					if (params.broadcast) {
-						await broker.broadcast(params.event, eventParams);
+						await broker.broadcast(params.event, eventParams, opts);
 					} else {
-						await broker.emit(params.event, eventParams);
+						await broker.emit(params.event, eventParams, opts);
 					}
 					return {
 						content: [
@@ -385,6 +389,23 @@ export function McpServerMixin(
 		},
 
 		methods: {
+			/**
+			 * Make the forwarded `ctx.meta` fields of the HTTP request (e.g. the user set by the
+			 * route `authenticate` method) available to the tool handlers, through the
+			 * `authInfo` that the MCP SDK passes in the handler `extra` argument.
+			 */
+			attachMcpMeta(req) {
+				const meta = _.pick(req.$ctx?.meta ?? {}, mixinOptions!.forwardMeta ?? []);
+				if (_.isEmpty(meta)) return;
+				req.auth = {
+					token: "",
+					clientId: "",
+					scopes: [],
+					...req.auth,
+					extra: { ...req.auth?.extra, [MCP_META_KEY]: meta }
+				};
+			},
+
 			/**
 			 * Re-generate the auto-discovered tools of every open session, so the clients
 			 * see the actions of services started (or stopped) after the session was opened.
@@ -461,6 +482,7 @@ export function McpServerMixin(
 								// so responses can flow back through the same transport
 								await server.connect(transport);
 
+								this.attachMcpMeta(req);
 								await transport.handleRequest(req, res);
 
 								return; // Already handled
@@ -468,6 +490,7 @@ export function McpServerMixin(
 
 							// Handle the request with existing transport - no need to reconnect
 							// The existing transport is already connected to the server
+							this.attachMcpMeta(req);
 							await transport.handleRequest(req, res);
 						} catch (error) {
 							this.logger.error("Error handling MCP request:", error);
@@ -525,6 +548,7 @@ export function McpServerMixin(
 						}
 
 						const transport = this.transports.get(sessionId);
+						this.attachMcpMeta(req);
 						await transport!.handleRequest(req, res);
 					},
 
@@ -554,6 +578,7 @@ export function McpServerMixin(
 
 						try {
 							const transport = this.transports.get(sessionId);
+							this.attachMcpMeta(req);
 							await transport!.handleRequest(req, res);
 						} catch (error) {
 							this.logger.error("Error handling session termination:", error);

@@ -23,8 +23,17 @@ export interface McpCustomTool {
 	/** Hints for the client about the tool behavior */
 	annotations?: ToolAnnotations;
 
-	/** Action name to call with the tool params, or a function returning the result */
-	handler: string | ((params: Record<string, unknown>, broker: ServiceBroker) => unknown);
+	/**
+	 * Action name to call with the tool params, or a function returning the result.
+	 * `meta` contains the fields forwarded from the HTTP request (see `forwardMeta`).
+	 */
+	handler:
+		| string
+		| ((
+				params: Record<string, unknown>,
+				broker: ServiceBroker,
+				meta: Record<string, unknown>
+		  ) => unknown);
 }
 
 export interface McpServerMixinOptions {
@@ -50,4 +59,10 @@ export interface McpServerMixinOptions {
 	 * when the services change. Set `false` to disable the refresh. Default: 1000
 	 */
 	refreshDebounceTime?: number | false;
+
+	/**
+	 * Fields of the HTTP request `ctx.meta` forwarded to the called actions and events, e.g. the
+	 * `user` set by the moleculer-web `authenticate` method of the route. Default: ["user"]
+	 */
+	forwardMeta?: string[];
 }

@@ -283,7 +283,11 @@ describe("MCP Server Integration Tests", () => {
 			expect(parsedHelloResult).toBe("Hello Moleculer");
 
 			// Verify that broker.call was called correctly
-			expect(callSpy).toHaveBeenCalledWith("greeter.hello", {});
+			expect(callSpy).toHaveBeenCalledWith(
+				"greeter.hello",
+				{},
+				expect.objectContaining({ meta: {} })
+			);
 
 			// Test calling greeter.welcome action with parameters
 			const welcomeResult = await callTool(mcpClient, "moleculer_call_action", {
@@ -297,7 +301,11 @@ describe("MCP Server Integration Tests", () => {
 			expect(parsedWelcomeResult).toBe("Welcome, John");
 
 			// Verify that broker.call was called correctly
-			expect(callSpy).toHaveBeenCalledWith("greeter.welcome", { name: "John" });
+			expect(callSpy).toHaveBeenCalledWith(
+				"greeter.welcome",
+				{ name: "John" },
+				expect.objectContaining({ meta: {} })
+			);
 
 			// Test calling math.add action
 			const addResult = await callTool(mcpClient, "moleculer_call_action", {
@@ -311,7 +319,11 @@ describe("MCP Server Integration Tests", () => {
 			expect(parsedAddResult).toBe(8);
 
 			// Verify that broker.call was called correctly
-			expect(callSpy).toHaveBeenCalledWith("math.add", { a: 5, b: 3 });
+			expect(callSpy).toHaveBeenCalledWith(
+				"math.add",
+				{ a: 5, b: 3 },
+				expect.objectContaining({ meta: {} })
+			);
 
 			// Test calling math.multiply action
 			const multiplyResult = await callTool(mcpClient, "moleculer_call_action", {
@@ -325,7 +337,11 @@ describe("MCP Server Integration Tests", () => {
 			expect(parsedMultiplyResult).toBe(24);
 
 			// Verify that broker.call was called correctly
-			expect(callSpy).toHaveBeenCalledWith("math.multiply", { a: 4, b: 6 });
+			expect(callSpy).toHaveBeenCalledWith(
+				"math.multiply",
+				{ a: 4, b: 6 },
+				expect.objectContaining({ meta: {} })
+			);
 
 			// Verify total number of calls
 			expect(callSpy).toHaveBeenCalledTimes(4);
@@ -406,10 +422,14 @@ describe("MCP Server Integration Tests", () => {
 			);
 
 			// Verify that emit was called with correct parameters
-			expect(emitSpy).toHaveBeenCalledWith("math.calculated", {
-				result: 42,
-				operation: "test"
-			});
+			expect(emitSpy).toHaveBeenCalledWith(
+				"math.calculated",
+				{
+					result: 42,
+					operation: "test"
+				},
+				{ meta: {} }
+			);
 			expect(emitSpy).toHaveBeenCalledTimes(1);
 
 			// Verify that broadcast was not called
@@ -452,10 +472,14 @@ describe("MCP Server Integration Tests", () => {
 			);
 
 			// Verify that broadcast was called with correct parameters
-			expect(broadcastSpy).toHaveBeenCalledWith("math.calculated", {
-				result: 100,
-				operation: "broadcast test"
-			});
+			expect(broadcastSpy).toHaveBeenCalledWith(
+				"math.calculated",
+				{
+					result: 100,
+					operation: "broadcast test"
+				},
+				{ meta: {} }
+			);
 			expect(broadcastSpy).toHaveBeenCalledTimes(1);
 
 			// Verify that emit was not called

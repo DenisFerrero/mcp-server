@@ -3,7 +3,7 @@ import Moleculer from "moleculer";
 import type { ActionSchema, ServiceBroker } from "moleculer";
 import type { McpServerMixinOptions } from "./types.js";
 import { convertActionParamsToZod } from "./schema-converter.js";
-import { toErrorResult, toTextResult } from "./utils.js";
+import { getForwardedMeta, toErrorResult, toTextResult } from "./utils.js";
 import "./moleculer-types.js";
 
 const { match } = Moleculer.Utils;
@@ -145,11 +145,12 @@ export function registerAutoDiscoveryTools(
 					inputSchema,
 					annotations
 				} as any, // Zod 3.25 deep type inference issue with MCP SDK registerTool
-				async (params: Record<string, unknown>) => {
+				async (params: Record<string, unknown>, extra) => {
 					try {
 						const result = await broker.call(
 							actionName,
-							isRootParams ? params.$$root : params
+							isRootParams ? params.$$root : params,
+							{ meta: getForwardedMeta(extra) }
 						);
 						return toTextResult(result);
 					} catch (err: unknown) {

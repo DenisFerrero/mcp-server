@@ -1,4 +1,16 @@
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+
+/** Key of `AuthInfo.extra` where the mixin stores the meta forwarded from the HTTP request */
+export const MCP_META_KEY = "moleculerMeta";
+
+/**
+ * Get the meta forwarded from the HTTP request (e.g. the authenticated `user`) from the
+ * `extra` argument of a MCP tool handler.
+ */
+export function getForwardedMeta(extra?: { authInfo?: AuthInfo }): Record<string, unknown> {
+	return (extra?.authInfo?.extra?.[MCP_META_KEY] as Record<string, unknown>) ?? {};
+}
 
 /**
  * Wrap a value into a successful MCP tool result (JSON text content).

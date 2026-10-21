@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ServiceBroker } from "moleculer";
 import type { McpCustomTool } from "./types.js";
-import { toErrorResult, toTextResult } from "./utils.js";
+import { getForwardedMeta, toErrorResult, toTextResult } from "./utils.js";
 
 /**
  * Register the manually declared tools.
@@ -15,13 +15,14 @@ export function registerCustomTools(
 	const logger = broker.getLogger("MCP-CustomTools");
 
 	for (const def of tools) {
-		const handler = async (params: Record<string, unknown>) => {
+		const handler = async (params: Record<string, unknown>, extra) => {
+			const meta = getForwardedMeta(extra);
 			try {
 				let result: unknown;
 				if (typeof def.handler === "function") {
-					result = await def.handler(params, broker);
+					result = await def.handler(params, broker, meta);
 				} else if (typeof def.handler === "string") {
-					result = await broker.call(def.handler, params);
+					result = await broker.call(def.handler, params, { meta });
 				} else {
 					throw new Error(`Invalid handler for tool '${def.name}'`);
 				}
@@ -44,7 +45,8 @@ export function registerCustomTools(
 				{
 					title: def.title,
 					description: def.description,
-					inputSchema: def.input,
+					// Without an input schema the SDK would call the handler without params
+					inputSchema: def.input ?? {},
 					outputSchema: def.output,
 					annotations: def.annotations
 				} as any, // Zod 3.25 deep type inference issue with MCP SDK registerTool

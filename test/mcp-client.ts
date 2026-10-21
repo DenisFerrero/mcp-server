@@ -12,7 +12,10 @@ export interface TestMcpClient {
 	sessionId: string;
 }
 
-export async function createMcpClient(serverUrl: string): Promise<TestMcpClient> {
+export async function createMcpClient(
+	serverUrl: string,
+	headers?: Record<string, string>
+): Promise<TestMcpClient> {
 	const client = new Client(
 		{
 			name: "test-client",
@@ -25,7 +28,9 @@ export async function createMcpClient(serverUrl: string): Promise<TestMcpClient>
 		}
 	);
 
-	const transport = new StreamableHTTPClientTransport(new URL(serverUrl));
+	const transport = new StreamableHTTPClientTransport(new URL(serverUrl), {
+		requestInit: headers ? { headers } : undefined
+	});
 	await client.connect(transport);
 
 	// Get session ID from the transport
