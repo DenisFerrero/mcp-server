@@ -16,6 +16,7 @@ src/
 test/
   index.test.ts         # Integration tests (MCP client ↔ server)
   schema-converter.test.ts  # Schema conversion unit tests
+  schema-converter-patterns.test.ts  # Format patterns and advanced types (also checks the JSON Schema)
   auto-discovery.test.ts    # Auto-discovery integration tests
   custom-tools-refresh.test.ts  # Custom tools and dynamic refresh tests
   version.test.ts       # VERSION ↔ package.json check

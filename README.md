@@ -278,6 +278,13 @@ The mixin automatically converts fastest-validator parameter schemas to Zod sche
 | `{ type: "array", items: "string", min: 1, max: 5 }` | `z.array(z.string()).min(1).max(5)` |
 | `{ type: "object", properties: { ... } }` | same as `props` |
 | `{ type: "multi", rules: ["string", "number"] }` or `["string", "number"]` | `z.union([z.string(), z.number()])` |
+| `{ type: "string", alpha: true }` (also `numeric`, `alphanum`, `alphadash`, `hex`, `base64`, `singleLine`) | `z.string().regex(...)` with the fastest-validator pattern |
+| `"mac"` | `z.string().regex(...)` (MAC address formats) |
+| `{ type: "currency", currencySymbol: "$", ... }` | `z.string().regex(...)` built like fastest-validator (`customRegex` supported) |
+| `"luhn"` | `z.string()` with a description of the checksum |
+| `{ type: "tuple", items: ["number", "string"] }` | `z.tuple([z.number(), z.string()])` |
+| `{ type: "record", key: "string", value: "number" }` | `z.record(z.string(), z.number())` |
+| `{ type: "equal", value: "yes" }` | `z.literal("yes")` (`field` comparisons are not converted) |
 | Unknown/custom type | `z.any()` |
 
 The Zod schema is used to describe the tool to the LLM (as JSON Schema): the real validation is still done by the action's validator when it is called. Rules that can't be expressed in JSON Schema (e.g. `trim`, `convert`, custom `check` functions) are therefore not converted.

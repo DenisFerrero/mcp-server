@@ -4,6 +4,25 @@ import { z, ZodTypeAny } from "zod";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ValidatorDef = Record<string, any>;
 
+// Patterns of the fastest-validator string flags. They are exported to the JSON Schema
+// as `pattern`, so the LLM knows the expected format.
+// RegExp flags (e.g. `/i`) are lost in the JSON Schema: write case-insensitive patterns explicitly.
+const STRING_FLAG_PATTERNS: Record<string, RegExp> = {
+	alpha: /^[a-zA-Z]+$/,
+	numeric: /^-?[0-9]\d*(\.\d+)?$/,
+	alphanum: /^[a-zA-Z0-9]+$/,
+	alphadash: /^[a-zA-Z0-9_-]+$/,
+	hex: /^[0-9a-fA-F]+$/,
+	base64: /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/,
+	singleLine: /^[^\r\n]*$/
+};
+
+const MAC_PATTERN =
+	/^((([a-fA-F0-9][a-fA-F0-9]+[-]){5}|([a-fA-F0-9][a-fA-F0-9]+[:]){5})([a-fA-F0-9][a-fA-F0-9])$)|(^([a-fA-F0-9][a-fA-F0-9][a-fA-F0-9][a-fA-F0-9]+[.]){2}([a-fA-F0-9][a-fA-F0-9][a-fA-F0-9][a-fA-F0-9]))$/;
+
+// From fastest-validator (lib/rules/currency.js)
+const CURRENCY_REGEX = "(?=.*\\d)^(-?~1|~1-?)(([0-9]\\d{0,2}(~2\\d{3})*)|0)?(\\~3\\d{1,2})?$";
+
 function convertSingleField(def: ValidatorDef): ZodTypeAny {
 	const type = def.type;
 	let schema: ZodTypeAny;
@@ -42,6 +61,27 @@ function convertSingleField(def: ValidatorDef): ZodTypeAny {
 		case "multi":
 			schema = buildMulti(def.rules);
 			break;
+		case "mac":
+			schema = z.string().regex(MAC_PATTERN);
+			break;
+		case "currency":
+			schema = buildCurrency(def);
+			break;
+		case "luhn":
+			// The checksum can't be expressed in JSON Schema, describe it instead
+			schema = z
+				.string()
+				.describe("Number validated with the Luhn checksum (e.g. a credit card number)");
+			break;
+		case "tuple":
+			schema = buildTuple(def);
+			break;
+		case "record":
+			schema = buildRecord(def);
+			break;
+		case "equal":
+			schema = buildEqual(def);
+			break;
 		case "any":
 			schema = z.any();
 			break;
@@ -74,6 +114,9 @@ function buildString(def: ValidatorDef): ZodTypeAny {
 	if (def.min != null) s = s.min(def.min);
 	if (def.max != null) s = s.max(def.max);
 	if (def.pattern) s = s.regex(new RegExp(def.pattern));
+	for (const [flag, pattern] of Object.entries(STRING_FLAG_PATTERNS)) {
+		if (def[flag] === true) s = s.regex(pattern);
+	}
 	if (def.enum != null && Array.isArray(def.enum) && def.enum.length > 0) {
 		const allStrings = def.enum.every((v: unknown) => typeof v === "string");
 		if (allStrings) return z.enum(def.enum as [string, ...string[]]);
@@ -124,6 +167,51 @@ function buildEnum(def: ValidatorDef): ZodTypeAny {
 		if (allStrings) return z.enum(def.values as [string, ...string[]]);
 		const literals = def.values.map((v: string | number | boolean) => z.literal(v));
 		return z.union(literals as unknown as [ZodTypeAny, ZodTypeAny, ...ZodTypeAny[]]);
+	}
+	return z.any();
+}
+
+function buildCurrency(def: ValidatorDef): ZodTypeAny {
+	if (def.customRegex) return z.string().regex(new RegExp(def.customRegex));
+
+	const currencySymbol = def.currencySymbol || null;
+	const thousandSeparator = def.thousandSeparator || ",";
+	const decimalSeparator = def.decimalSeparator || ".";
+	const isCurrencySymbolMandatory = !def.symbolOptional;
+	const pattern = CURRENCY_REGEX.replace(
+		/~1/g,
+		currencySymbol ? `\\${currencySymbol}${isCurrencySymbolMandatory ? "" : "?"}` : ""
+	)
+		.replace("~2", thousandSeparator)
+		.replace("~3", decimalSeparator);
+
+	return z.string().regex(new RegExp(pattern));
+}
+
+function buildTuple(def: ValidatorDef): ZodTypeAny {
+	if (!Array.isArray(def.items) || def.items.length === 0) return z.array(z.any());
+	const items = def.items.map((item: unknown) => parseFieldDef(item));
+	return z.tuple(items as [ZodTypeAny, ...ZodTypeAny[]]);
+}
+
+function buildRecord(def: ValidatorDef): ZodTypeAny {
+	// JSON object keys are always strings, but they can still be restricted (e.g. enum, pattern)
+	const key = def.key ? parseFieldDef(def.key) : z.string();
+	const value = def.value ? parseFieldDef(def.value) : z.any();
+	return z.record(key, value);
+}
+
+function buildEqual(def: ValidatorDef): ZodTypeAny {
+	// Equality with another field (`field`) can't be expressed in JSON Schema
+	if (def.field) return z.any();
+	const value = def.value;
+	if (
+		typeof value === "string" ||
+		typeof value === "number" ||
+		typeof value === "boolean" ||
+		value === null
+	) {
+		return z.literal(value);
 	}
 	return z.any();
 }

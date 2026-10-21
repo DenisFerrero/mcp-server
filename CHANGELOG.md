@@ -14,7 +14,7 @@ All notable changes to this project will be documented in this file.
 - **Custom tools** — New `tools` option to declare tools with Zod `input`/`output` schemas, annotations and a handler (action name or function). With `output` the result is also returned as `structuredContent`.
 - **Dynamic tools refresh** — On `$services.changed` the auto-discovered tools of every open session are regenerated and clients are notified with `tools/list_changed`. Debounced by the new `refreshDebounceTime` option (default `1000`, `false` to disable).
 - **`mcp.title`** — Custom title for auto-discovered tools.
-- **Schema converter** — Full pipe syntax with options (`"string|min:3|max:10"`), `description` forwarded to the schema, `nullable`, `uuid`, `multi` (also as array shorthand), `properties` alias, string `length`/`empty` and array `min`/`max`/`length`/`empty`.
+- **Schema converter** — Full pipe syntax with options (`"string|min:3|max:10"`), `description` forwarded to the schema, `nullable`, `uuid`, `multi` (also as array shorthand), `properties` alias, string `length`/`empty` and array `min`/`max`/`length`/`empty`. String format flags (`alpha`, `numeric`, `alphanum`, `alphadash`, `hex`, `base64`, `singleLine`) and the `mac`, `currency`, `luhn`, `tuple`, `record`, `equal` types are converted too: their patterns are exported to the JSON Schema, so the LLM knows the expected format.
 
 ### Fixed issues
 
