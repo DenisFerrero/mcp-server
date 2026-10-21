@@ -20,9 +20,9 @@
 		"dist"
 	],
 	"scripts": {
-		"dev": "set DANGEROUSLY_OMIT_AUTH=true && nodemon --inspect examples/index.ts",
+		"dev": "cross-env DANGEROUSLY_OMIT_AUTH=true nodemon --inspect examples/index.ts",
 		"start": "tsx src/index.ts",
-		"inspect": "set DANGEROUSLY_OMIT_AUTH=true && npx @modelcontextprotocol/inspector tsx ./src/index.ts",
+		"inspect": "cross-env DANGEROUSLY_OMIT_AUTH=true npx @modelcontextprotocol/inspector tsx ./src/index.ts",
 		"client": "tsx examples/client/index.ts",
 		"ci": "vitest --watch",
 		"test": "vitest --run --coverage",
@@ -32,9 +32,10 @@
 		"lint:fix": "eslint --ext=.ts src examples test --fix",
 		"check": "tsc --noEmit true",
 		"prebuild": "rimraf dist",
-		"build": "NODE_OPTIONS='--max-old-space-size=4096' tsc -b tsconfig.cjs.json tsconfig.esm.json tsconfig.types.json",
-		"postbuild": "echo {\"type\": \"commonjs\"} > dist/cjs/package.json && echo {\"type\": \"module\"} > dist/esm/package.json",
-		"prepack": "npm run build"
+		"build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 tsc -b tsconfig.cjs.json tsconfig.esm.json tsconfig.types.json",
+		"postbuild": "node scripts/postbuild.mjs",
+		"prepack": "npm run build",
+		"version": "node scripts/sync-version.mjs && git add src/version.ts"
 	},
 	"keywords": [
 		"mcp-server",
@@ -63,6 +64,7 @@
 		"@types/lodash": "^4.17.24",
 		"@types/node": "^25.5.0",
 		"@vitest/coverage-v8": "^4.1.2",
+		"cross-env": "^10.1.0",
 		"eslint": "^10.1.0",
 		"eslint-config-prettier": "^10.1.8",
 		"eslint-plugin-node": "^11.1.0",
