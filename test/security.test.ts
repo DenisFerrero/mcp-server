@@ -3,7 +3,7 @@ import { Context, ServiceBroker } from "moleculer";
 import ApiGateway from "moleculer-web";
 import { McpServerMixin } from "../src/index.js";
 import type { McpServerMixinOptions } from "../src/index.js";
-import { createMcpClient, closeMcpClient, callTool } from "./mcp-client.js";
+import { createMcpClient, closeMcpClient, callTool, listTools } from "./mcp-client.js";
 import type { Server } from "http";
 import type { AddressInfo } from "net";
 
@@ -50,6 +50,14 @@ describe("Security", () => {
 				"user.seen"(ctx: Context<unknown, Record<string, unknown>>) {
 					receivedEvents.push(ctx.meta.user);
 				}
+			}
+		});
+		broker.createService({
+			name: "admin",
+			actions: {
+				reset: { mcp: false, handler: () => "reset done" },
+				internal: { visibility: "public", handler: () => "internal" },
+				status: { handler: () => "ok" }
 			}
 		});
 		await broker.start();
@@ -130,6 +138,74 @@ describe("Security", () => {
 
 				await callTool(mcpClient, "moleculer_emit_event", { event: "user.seen" });
 				expect(receivedEvents).toEqual([{ name: "john" }]);
+			} finally {
+				await closeMcpClient(mcpClient);
+			}
+		});
+	});
+
+	describe("moleculer_call_action filters", () => {
+		async function callAction(options: McpServerMixinOptions, action: string) {
+			await start(options);
+			const mcpClient = await connect();
+			try {
+				return await callTool(mcpClient, "moleculer_call_action", { action });
+			} finally {
+				await closeMcpClient(mcpClient);
+			}
+		}
+
+		function expectBlocked(result: Awaited<ReturnType<typeof callTool>>, action: string) {
+			expect(result.isError).toBe(true);
+			expect(result.content[0].text).toContain(`Action '${action}' is not exposed via MCP`);
+		}
+
+		it("should call exposed actions", async () => {
+			const result = await callAction({}, "admin.status");
+			expect(result.isError).toBeFalsy();
+			expect(result.content[0].text).toContain("ok");
+		});
+
+		it("should block actions with mcp: false", async () => {
+			expectBlocked(await callAction({}, "admin.reset"), "admin.reset");
+		});
+
+		it("should block not published actions", async () => {
+			expectBlocked(await callAction({}, "admin.internal"), "admin.internal");
+		});
+
+		it("should block internal $node actions", async () => {
+			expectBlocked(await callAction({}, "$node.list"), "$node.list");
+		});
+
+		it("should block actions excluded by excludeActions", async () => {
+			const result = await callAction({ excludeActions: ["admin.*"] }, "admin.status");
+			expectBlocked(result, "admin.status");
+		});
+
+		it("should block services outside the services whitelist", async () => {
+			const result = await callAction({ services: ["whoami"] }, "admin.status");
+			expectBlocked(result, "admin.status");
+		});
+
+		it("should still report unknown actions as ServiceNotFoundError", async () => {
+			const result = await callAction({}, "unknown.action");
+			expect(result.isError).toBe(true);
+			expect(result.content[0].text).toContain("ServiceNotFoundError");
+		});
+	});
+
+	describe("exposeGenericTools", () => {
+		it("should hide moleculer_call_action and moleculer_emit_event when false", async () => {
+			await start({ exposeGenericTools: false });
+			const mcpClient = await connect();
+			try {
+				const toolNames = (await listTools(mcpClient)).map(t => t.name);
+				expect(toolNames).not.toContain("moleculer_call_action");
+				expect(toolNames).not.toContain("moleculer_emit_event");
+				// The other tools are not affected
+				expect(toolNames).toContain("moleculer_list_actions");
+				expect(toolNames).toContain("admin_status");
 			} finally {
 				await closeMcpClient(mcpClient);
 			}

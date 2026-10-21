@@ -57,8 +57,15 @@ function detectAnnotations(restMethod: string | null): Record<string, boolean> {
 	return annotations;
 }
 
-function shouldIncludeAction(actionEntry: ActionEntry, options: McpServerMixinOptions): boolean {
+/**
+ * Check whether an action can be called through MCP, applying the same rules to the
+ * auto-discovered tools and to the generic `moleculer_call_action` tool.
+ */
+export function isActionExposed(actionEntry: ActionEntry, options: McpServerMixinOptions): boolean {
 	const actionName = actionEntry.name;
+
+	// Internal actions (e.g. `$node.*`)
+	if (actionName.startsWith("$")) return false;
 	const serviceName = actionName.split(".").slice(0, -1).join(".");
 	const actionDef = actionEntry.action;
 
@@ -108,7 +115,7 @@ export function registerAutoDiscoveryTools(
 	const prefix = options.toolNamePrefix || "";
 
 	for (const actionEntry of actions) {
-		if (!shouldIncludeAction(actionEntry, options)) continue;
+		if (!isActionExposed(actionEntry, options)) continue;
 
 		const actionName = actionEntry.name;
 		const actionDef = actionEntry.action || {};

@@ -48,6 +48,13 @@ export interface McpServerMixinOptions {
 	/** Whether to expose broker tools (list_nodes, list_services, etc.). Default: true */
 	exposeBrokerTools?: boolean;
 
+	/**
+	 * Whether to expose the generic `moleculer_call_action` and `moleculer_emit_event` tools.
+	 * `moleculer_call_action` applies the same filters of the auto-discovered tools, while
+	 * `moleculer_emit_event` can emit any event. Default: true
+	 */
+	exposeGenericTools?: boolean;
+
 	/** Prefix for auto-generated tool names. Default: "" */
 	toolNamePrefix?: string;
 

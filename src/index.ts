@@ -17,7 +17,7 @@ import _ from "lodash";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { McpCustomTool, McpServerMixinOptions } from "./types.js";
-import { registerAutoDiscoveryTools } from "./tool-generator.js";
+import { isActionExposed, registerAutoDiscoveryTools } from "./tool-generator.js";
 import { registerCustomTools } from "./custom-tools.js";
 import { getForwardedMeta, MCP_META_KEY, toErrorResult, toTextResult } from "./utils.js";
 import "./moleculer-types.js";
@@ -38,6 +38,7 @@ export function McpServerMixin(
 			path: "/mcp"
 		},
 		exposeBrokerTools: true,
+		exposeGenericTools: true,
 		toolNamePrefix: "",
 		tools: [],
 		refreshDebounceTime: 1000,
@@ -255,121 +256,136 @@ export function McpServerMixin(
 			);
 		} // end exposeBrokerTools
 
-		server.registerTool(
-			"moleculer_call_action",
-			{
-				title: "Call Action",
-				description: "Call a Moleculer action",
-				inputSchema: {
-					action: z.string().describe("Action name"),
-					jsonParams: z
-						.string()
-						.describe(
-							'Actions parameters as a JSON object string. E.g. \'{"name":"John"}\'\nIf you don\'t know the parameters of the action, call the `moleculer_list_actions` tool first.'
-						)
-						.optional()
-				},
-				annotations: {
-					readOnlyHint: false,
-					destructiveHint: false,
-					idempotentHint: false,
-					openWorldHint: true
-				}
-			} as any,
-			async (params: Record<string, any>, extra) => {
-				logger.info("Calling Moleculer action...", params);
-				if (!params.action) {
-					throw new Error("action parameter is required");
-				}
+		if (mixinOptions!.exposeGenericTools !== false) {
+			server.registerTool(
+				"moleculer_call_action",
+				{
+					title: "Call Action",
+					description: "Call a Moleculer action",
+					inputSchema: {
+						action: z.string().describe("Action name"),
+						jsonParams: z
+							.string()
+							.describe(
+								'Actions parameters as a JSON object string. E.g. \'{"name":"John"}\'\nIf you don\'t know the parameters of the action, call the `moleculer_list_actions` tool first.'
+							)
+							.optional()
+					},
+					annotations: {
+						readOnlyHint: false,
+						destructiveHint: false,
+						idempotentHint: false,
+						openWorldHint: true
+					}
+				} as any,
+				async (params: Record<string, any>, extra) => {
+					logger.info("Calling Moleculer action...", params);
+					if (!params.action) {
+						throw new Error("action parameter is required");
+					}
 
-				let actionParams = {};
-				if (params.jsonParams) {
-					try {
-						actionParams = JSON.parse(params.jsonParams);
-					} catch (err) {
-						throw new Error(
-							"The 'jsonParams' must be a valid JSON object string: " + err.message,
-							{ cause: err }
+					// The generic tool must not bypass the filters of the auto-discovered tools.
+					// Unknown actions are still called, to get the usual ServiceNotFoundError.
+					const entry = broker.registry
+						.getActionList({})
+						.find(a => a.name === params.action);
+					if (entry && !isActionExposed(entry, mixinOptions!)) {
+						return toErrorResult(
+							new Error(`Action '${params.action}' is not exposed via MCP`)
 						);
 					}
-				}
-				try {
-					const result = await broker.call(params.action, actionParams, {
-						meta: getForwardedMeta(extra)
-					});
-					return toTextResult(result);
-				} catch (err) {
-					logger.error("Error calling action:", err);
-					return toErrorResult(err);
-				}
-			}
-		);
 
-		server.registerTool(
-			"moleculer_emit_event",
-
-			{
-				title: "Emit (or broadcast) an Event",
-				description: "Emit a Moleculer event",
-				inputSchema: {
-					event: z.string().describe("Event name"),
-					jsonParams: z
-						.string()
-						.describe(
-							'Event parameters as a JSON object string. E.g. \'{"name":"John"}\'\nIf you don\'t know the parameters of the event, call the `moleculer_list_events` tool first.'
-						)
-						.optional(),
-					broadcast: z
-						.boolean()
-						.optional()
-						.default(false)
-						.describe("Set to true to broadcast the event to all nodes")
-				},
-				annotations: {
-					readOnlyHint: false,
-					destructiveHint: false,
-					idempotentHint: false,
-					openWorldHint: true
-				}
-			} as any,
-			async (params: Record<string, any>, extra) => {
-				logger.info("Emitting Moleculer event...", params);
-				if (!params.event) {
-					throw new Error("event parameter is required");
-				}
-
-				let eventParams = {};
-				if (params.jsonParams) {
+					let actionParams = {};
+					if (params.jsonParams) {
+						try {
+							actionParams = JSON.parse(params.jsonParams);
+						} catch (err) {
+							throw new Error(
+								"The 'jsonParams' must be a valid JSON object string: " +
+									err.message,
+								{ cause: err }
+							);
+						}
+					}
 					try {
-						eventParams = JSON.parse(params.jsonParams);
+						const result = await broker.call(params.action, actionParams, {
+							meta: getForwardedMeta(extra)
+						});
+						return toTextResult(result);
 					} catch (err) {
-						throw new Error(
-							"The 'jsonParams' must be a valid JSON object string: " + err.message,
-							{ cause: err }
-						);
+						logger.error("Error calling action:", err);
+						return toErrorResult(err);
 					}
 				}
-				try {
-					const opts = { meta: getForwardedMeta(extra) };
-					if (params.broadcast) {
-						await broker.broadcast(params.event, eventParams, opts);
-					} else {
-						await broker.emit(params.event, eventParams, opts);
+			);
+
+			server.registerTool(
+				"moleculer_emit_event",
+
+				{
+					title: "Emit (or broadcast) an Event",
+					description: "Emit a Moleculer event",
+					inputSchema: {
+						event: z.string().describe("Event name"),
+						jsonParams: z
+							.string()
+							.describe(
+								'Event parameters as a JSON object string. E.g. \'{"name":"John"}\'\nIf you don\'t know the parameters of the event, call the `moleculer_list_events` tool first.'
+							)
+							.optional(),
+						broadcast: z
+							.boolean()
+							.optional()
+							.default(false)
+							.describe("Set to true to broadcast the event to all nodes")
+					},
+					annotations: {
+						readOnlyHint: false,
+						destructiveHint: false,
+						idempotentHint: false,
+						openWorldHint: true
 					}
-					return {
-						content: [
-							{
-								type: "text",
-								text: `Event '${params.event}' emitted successfully`
-							}
-						]
-					};
-				} catch (err) {
-					logger.error("Error emitting event:", err);
-					return toErrorResult(err);
+				} as any,
+				async (params: Record<string, any>, extra) => {
+					logger.info("Emitting Moleculer event...", params);
+					if (!params.event) {
+						throw new Error("event parameter is required");
+					}
+
+					let eventParams = {};
+					if (params.jsonParams) {
+						try {
+							eventParams = JSON.parse(params.jsonParams);
+						} catch (err) {
+							throw new Error(
+								"The 'jsonParams' must be a valid JSON object string: " +
+									err.message,
+								{ cause: err }
+							);
+						}
+					}
+					try {
+						const opts = { meta: getForwardedMeta(extra) };
+						if (params.broadcast) {
+							await broker.broadcast(params.event, eventParams, opts);
+						} else {
+							await broker.emit(params.event, eventParams, opts);
+						}
+						return {
+							content: [
+								{
+									type: "text",
+									text: `Event '${params.event}' emitted successfully`
+								}
+							]
+						};
+					} catch (err) {
+						logger.error("Error emitting event:", err);
+						return toErrorResult(err);
+					}
 				}
-			}
-		);
+			);
+		} // end exposeGenericTools
 
 		// Custom tools take precedence over the auto-discovered ones
 		registerCustomTools(server, broker, mixinOptions!.tools ?? []);
