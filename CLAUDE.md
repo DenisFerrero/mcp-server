@@ -11,7 +11,8 @@ src/
   schema-converter.ts   # fastest-validator → Zod schema conversion
   tool-generator.ts     # Auto-discovery: action registry → MCP tool registration
   custom-tools.ts       # Registration of the `tools` option
-  utils.ts              # Tool result helpers (toTextResult, toErrorResult)
+  utils.ts              # Tool result helpers (toTextResult, toErrorResult), forwarded meta
+  event-store.ts        # Bounded in-memory SSE event store
   version.ts            # Package version (kept in sync with package.json by a test)
 test/
   index.test.ts         # Integration tests (MCP client ↔ server)
@@ -20,6 +21,8 @@ test/
   auto-discovery.test.ts    # Auto-discovery integration tests
   custom-tools-refresh.test.ts  # Custom tools and dynamic refresh tests
   version.test.ts       # VERSION ↔ package.json check
+  security.test.ts      # Meta forwarding, call_action filters, exposeGenericTools
+  sessions.test.ts      # Event store and idle sessions cleanup
   mcp-client.ts         # Test MCP client helper
 examples/
   index.ts              # Entry point (module selector)
@@ -55,9 +58,13 @@ npm run dev       # nodemon with MCP inspector
 - `services` — `string | string[]` — service whitelist or glob pattern
 - `excludeActions` — `string[]` — action name patterns to exclude
 - `exposeBrokerTools` — `boolean` (default: `true`) — show/hide list_nodes, list_services, etc.
+- `exposeGenericTools` — `boolean` (default: `true`) — show/hide moleculer_call_action and moleculer_emit_event
 - `toolNamePrefix` — `string` (default: `""`) — prefix for auto-generated tool names
 - `tools` — `McpCustomTool[]` (default: `[]`) — manually declared tools
 - `refreshDebounceTime` — `number | false` (default: `1000`) — debounce of the tools refresh on `$services.changed`
+- `forwardMeta` — `string[]` (default: `["user"]`) — HTTP request `ctx.meta` fields forwarded to actions/events
+- `sessionTimeout` — `number | false` (default: 30 min) — close idle sessions
+- `maxStoredEvents` — `number` (default: `1000`) — SSE events kept per session
 
 ## Tech Stack
 

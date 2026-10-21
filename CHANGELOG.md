@@ -8,12 +8,19 @@ All notable changes to this project will be documented in this file.
 
 - **Only `published` actions are auto-discovered.** Actions with `visibility: "public" | "protected" | "private"` are no longer exposed as MCP tools, consistently with the API gateway.
 - **Tool errors are flagged with `isError: true`** and no longer include the stack trace. The payload now contains `name`, `message`, `code`, `type`, `data`.
+- **`moleculer_call_action` applies the auto-discovery filters.** Internal (`$`), not published, `mcp: false` actions and the ones filtered by `services`/`excludeActions` return a `not exposed via MCP` error.
+- **Sessions are closed after 30 minutes of inactivity** (no requests, no open SSE stream). See `sessionTimeout`.
+- **Tool params are logged at `debug` level** (they were logged at `info`).
 
 ### New features
 
 - **Custom tools** — New `tools` option to declare tools with Zod `input`/`output` schemas, annotations and a handler (action name or function). With `output` the result is also returned as `structuredContent`.
 - **Dynamic tools refresh** — On `$services.changed` the auto-discovered tools of every open session are regenerated and clients are notified with `tools/list_changed`. Debounced by the new `refreshDebounceTime` option (default `1000`, `false` to disable).
 - **`mcp.title`** — Custom title for auto-discovered tools.
+- **Authenticated user forwarding** — The `forwardMeta` fields (default `["user"]`) of the HTTP request `ctx.meta`, e.g. the user set by the route `authenticate` method, are forwarded as `meta` to the actions and events called by the tools.
+- **`exposeGenericTools` option** — Hides `moleculer_call_action` and `moleculer_emit_event`.
+- **Idle sessions cleanup** — New `sessionTimeout` option (default 30 minutes, `false` to disable).
+- **Bounded event store** — New `maxStoredEvents` option (default `1000`) for the SSE resumability store.
 - **Schema converter** — Full pipe syntax with options (`"string|min:3|max:10"`), `description` forwarded to the schema, `nullable`, `uuid`, `multi` (also as array shorthand), `properties` alias, string `length`/`empty` and array `min`/`max`/`length`/`empty`. String format flags (`alpha`, `numeric`, `alphanum`, `alphadash`, `hex`, `base64`, `singleLine`) and the `mac`, `currency`, `luhn`, `tuple`, `record`, `equal` types are converted too: their patterns are exported to the JSON Schema, so the LLM knows the expected format.
 
 ### Fixed issues
@@ -21,6 +28,9 @@ All notable changes to this project will be documented in this file.
 - **Package entry points** — The 0.2.0 build output was emitted in `dist/*/src/` while `main`/`exports` pointed to `dist/*/index.js`, and the ESM build imported `package.json` without an import attribute. The version is now in `src/version.ts` and CI smoke-tests the built package.
 - **`$$root` params** — Auto-discovered tools passed `{ $$root: value }` to the action instead of `value`.
 - **Duplicated tool names** — A tool name clash (e.g. two actions with the same `mcp.name`) threw while creating the session; the duplicate is now skipped with a warning.
+- **Unbounded memory usage** — Sessions of clients gone away without a `DELETE` request were never released, and the SDK example `InMemoryEventStore` kept every SSE event forever.
+- **SSE resumability of the standalone stream** — The SDK example store could not resume the `_GET_stream`, because it extracted the stream ID splitting the event ID on `_`.
+- **Custom tools without `input`** — The handler received the SDK `extra` object in place of the params.
 
 ## 0.2.0 (2026-03-28)
 

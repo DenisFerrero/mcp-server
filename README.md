@@ -110,6 +110,10 @@ McpServerMixin({
   // Default: true
   exposeBrokerTools: true,
 
+  // Show/hide the generic moleculer_call_action and moleculer_emit_event tools
+  // Default: true
+  exposeGenericTools: true,
+
   // Prefix for auto-generated tool names
   // Default: "" (no prefix)
   // Example: "mol_" → tool name: "mol_weather_forecast"
@@ -120,7 +124,19 @@ McpServerMixin({
 
   // Debounce time (ms) of the tools refresh when services change, false to disable
   // Default: 1000
-  refreshDebounceTime: 1000
+  refreshDebounceTime: 1000,
+
+  // ctx.meta fields of the HTTP request forwarded to actions and events (see "Security")
+  // Default: ["user"]
+  forwardMeta: ["user"],
+
+  // Close sessions idle for this time (ms), false to disable
+  // Default: 30 minutes
+  sessionTimeout: 30 * 60 * 1000,
+
+  // SSE events kept in memory per session for resumability
+  // Default: 1000
+  maxStoredEvents: 1000
 })
 ```
 
@@ -130,9 +146,45 @@ McpServerMixin({
 | `services` | `string \| string[]` | `undefined` | Whitelist of service names or glob pattern |
 | `excludeActions` | `string[]` | `undefined` | Action name patterns to exclude |
 | `exposeBrokerTools` | `boolean` | `true` | Whether to register built-in broker tools |
+| `exposeGenericTools` | `boolean` | `true` | Whether to register `moleculer_call_action` and `moleculer_emit_event` |
 | `toolNamePrefix` | `string` | `""` | Prefix for auto-generated tool names |
 | `tools` | `McpCustomTool[]` | `[]` | Manually declared tools |
 | `refreshDebounceTime` | `number \| false` | `1000` | Debounce of the tools refresh on `$services.changed`, `false` to disable |
+| `forwardMeta` | `string[]` | `["user"]` | `ctx.meta` fields of the HTTP request forwarded to the called actions and events |
+| `sessionTimeout` | `number \| false` | `1800000` (30 min) | Close sessions with no requests and no open SSE stream for this time |
+| `maxStoredEvents` | `number` | `1000` | SSE events kept in memory per session to resume interrupted streams |
+
+## Security
+
+### Authentication
+
+The MCP route is a regular moleculer-web route, so it can be protected with the usual `authentication`/`authorization` route options. The `ctx.meta` fields listed in `forwardMeta` (by default the `user` returned by `authenticate`) are forwarded to every action called by a tool and to every emitted event, so the actions can check who is calling them. They are taken from each HTTP request, not from the session.
+
+```javascript
+export default {
+  name: "api",
+  mixins: [ApiGateway, McpServerMixin({ routeOptions: { authentication: true } })],
+  methods: {
+    async authenticate(ctx, route, req) {
+      const token = req.headers["authorization"]?.replace("Bearer ", "");
+      if (!token) return null;
+      return await ctx.call("users.resolveToken", { token }); // → ctx.meta.user
+    }
+  }
+};
+```
+
+Custom tools with a function handler receive the forwarded meta as third argument: `handler(params, broker, meta)`.
+
+### What the LLM can call
+
+- Auto-discovered tools are generated only for actions that pass all the filters: not internal (`$`), `published` visibility, not `mcp: false`, matching `services` and not matching `excludeActions`.
+- `moleculer_call_action` applies the same filters: a filtered action returns a `not exposed via MCP` error.
+- `moleculer_emit_event` can emit **any** event. Set `exposeGenericTools: false` if the LLM must not emit events or call actions by name.
+
+### Sessions
+
+Each MCP session lives in the memory of the gateway process (use sticky sessions with multiple gateway instances). Sessions are closed on `DELETE` requests or after `sessionTimeout` without activity, and keep at most `maxStoredEvents` SSE events to resume interrupted streams.
 
 If two tools end up with the same name (e.g. two actions with the same `mcp.name`), the first registered one wins and the others are skipped with a warning. Registration order: broker tools, custom tools, auto-discovered tools.
 
@@ -300,11 +352,11 @@ When `exposeBrokerTools` is `true` (default), the following broker-level tools a
 | `moleculer_list_actions` | List all available actions |
 | `moleculer_list_events` | List all event listeners |
 
-These tools are always registered regardless of `exposeBrokerTools`:
+These tools are registered regardless of `exposeBrokerTools`, unless `exposeGenericTools` is `false`:
 
 | Tool | Description |
 |---|---|
-| `moleculer_call_action` | Call any Moleculer action by name (generic fallback) |
+| `moleculer_call_action` | Call an exposed Moleculer action by name (generic fallback, same filters as auto-discovery) |
 | `moleculer_emit_event` | Emit or broadcast a Moleculer event |
 
 ## MCP Client Setup
