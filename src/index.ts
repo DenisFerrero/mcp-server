@@ -551,6 +551,22 @@ export function McpServerMixin(
 				}
 			},
 
+			/** Close all the open MCP sessions (their transports and SSE streams) */
+			async closeMcpSessions() {
+				for (const [sessionId, transport] of this.transports) {
+					try {
+						this.logger.info(`Closing transport for session ${sessionId}`);
+						await transport.close();
+						this.transports.delete(sessionId);
+					} catch (error) {
+						this.logger.error(
+							`Error closing transport for session ${sessionId}:`,
+							error
+						);
+					}
+				}
+			},
+
 			/**
 			 * Track a request of a session until its response is closed (for SSE streams,
 			 * until the client disconnects), so busy sessions are not closed as idle.
@@ -816,6 +832,22 @@ export function McpServerMixin(
 				);
 				this.mcpIdleTimer.unref?.();
 			}
+
+			// moleculer-web closes the HTTP server in its own `stopped` hook, which runs before
+			// this one when ApiGateway comes first in `mixins`: an open SSE stream would keep
+			// `server.close()` waiting forever. Close the MCP sessions before the server.
+			const server = this.server;
+			if (server) {
+				const close = server.close.bind(server);
+				server.close = callback => {
+					this.closeMcpSessions().finally(() => {
+						// Keep-alive connections left by the closed streams
+						server.closeIdleConnections?.();
+						close(callback);
+					});
+					return server;
+				};
+			}
 		},
 
 		async stopped() {
@@ -825,16 +857,7 @@ export function McpServerMixin(
 
 			this.debouncedRefreshMcpTools?.cancel();
 
-			// Close all active transports to properly clean up resources
-			for (const [sessionId, transport] of this.transports) {
-				try {
-					this.logger.info(`Closing transport for session ${sessionId}`);
-					await transport.close();
-					this.transports.delete(sessionId);
-				} catch (error) {
-					this.logger.error(`Error closing transport for session ${sessionId}:`, error);
-				}
-			}
+			await this.closeMcpSessions();
 
 			this.logger.info("Server shutdown complete");
 		}

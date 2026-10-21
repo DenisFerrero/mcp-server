@@ -98,7 +98,7 @@ describe("Session timeout", () => {
 		expect(apiService.transports.size).toBe(1);
 
 		// Closing the client aborts its SSE stream, but doesn't terminate the session
-		await closeMcpClient(mcpClient);
+		await closeMcpClient(mcpClient, { terminate: false });
 		expect(apiService.transports.size).toBe(1);
 
 		await vi.waitFor(() => expect(apiService.transports.size).toBe(0), {
@@ -122,9 +122,22 @@ describe("Session timeout", () => {
 		}
 	});
 
+	it("should stop the gateway quickly while clients are connected", async () => {
+		// An open SSE stream used to keep the moleculer-web server.close() waiting forever
+		const mcpClient = await start({});
+		try {
+			const t = Date.now();
+			await broker.stop();
+			expect(Date.now() - t).toBeLessThan(2000);
+			expect(apiService.transports.size).toBe(0);
+		} finally {
+			await closeMcpClient(mcpClient, { terminate: false });
+		}
+	});
+
 	it("should not close sessions when sessionTimeout is false", async () => {
 		const mcpClient = await start({ sessionTimeout: false });
-		await closeMcpClient(mcpClient);
+		await closeMcpClient(mcpClient, { terminate: false });
 		await sleep(500);
 		expect(apiService.transports.size).toBe(1);
 	});

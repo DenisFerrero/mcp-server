@@ -44,8 +44,18 @@ export async function createMcpClient(
 	};
 }
 
-export async function closeMcpClient(mcpClient: TestMcpClient): Promise<void> {
+/**
+ * Close the client. By default the session is terminated with a DELETE request, as a well
+ * behaved client does; otherwise the SDK client reconnects its SSE stream when the server
+ * closes it and the keep-alive connection delays the server shutdown.
+ * Use `{ terminate: false }` to simulate a client gone away.
+ */
+export async function closeMcpClient(
+	mcpClient: TestMcpClient,
+	{ terminate = true }: { terminate?: boolean } = {}
+): Promise<void> {
 	try {
+		if (terminate) await mcpClient.transport.terminateSession();
 		await mcpClient.client.close();
 		await mcpClient.transport.close();
 	} catch {
