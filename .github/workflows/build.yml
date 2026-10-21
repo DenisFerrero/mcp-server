@@ -38,3 +38,8 @@ jobs:
 
     - name: Build (CJS + ESM + types)
       run: npm run build
+
+    - name: Smoke test package entry points
+      run: |
+        node -e "require('@moleculer/mcp-server').McpServerMixin"
+        node --input-type=module -e "const m = await import('@moleculer/mcp-server'); m.McpServerMixin"

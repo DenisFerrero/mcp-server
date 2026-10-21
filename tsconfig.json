@@ -12,6 +12,7 @@
 
 		"declaration": false,
 		"outDir": "dist",
+		"rootDir": "src",
 		"esModuleInterop": true,
 		"allowSyntheticDefaultImports": true,
 		"rewriteRelativeImportExtensions": true,

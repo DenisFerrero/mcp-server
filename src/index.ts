@@ -6,7 +6,7 @@
 
 "use strict";
 
-import pkg from "../package.json";
+import { VERSION } from "./version.js";
 
 import { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -51,7 +51,7 @@ export function McpServerMixin(
 		const server = new McpServer(
 			{
 				name: "Moleculer MCP Server",
-				version: pkg.version
+				version: VERSION
 			},
 			{
 				capabilities: {
