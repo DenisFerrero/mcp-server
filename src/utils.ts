@@ -1,7 +1,9 @@
 import type { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
+import type { CallingOptions } from "moleculer";
 import type { ZodRawShape } from "zod";
+import type { McpServerMixinOptions } from "./types.js";
 
 /** Configuration of a MCP tool */
 export interface ToolConfig {
@@ -45,17 +47,31 @@ export function getForwardedMeta(extra?: { authInfo?: AuthInfo }): Record<string
 }
 
 /**
- * Wrap a value into a successful MCP tool result (JSON text content).
+ * Calling options for the actions called by a tool: the configured `callOptions`
+ * (e.g. `timeout`) and the meta forwarded from the HTTP request.
  */
-export function toTextResult(result: unknown): CallToolResult {
-	return {
-		content: [
-			{
-				type: "text",
-				text: result === undefined ? "null" : JSON.stringify(result, null, 2)
-			}
-		]
-	};
+export function getCallOptions(
+	options: McpServerMixinOptions,
+	extra?: { authInfo?: AuthInfo }
+): CallingOptions {
+	const callOptions = options.callOptions ?? {};
+	return { ...callOptions, meta: { ...callOptions.meta, ...getForwardedMeta(extra) } };
+}
+
+/**
+ * Wrap a value into a successful MCP tool result (JSON text content).
+ * Texts longer than `maxLength` characters are truncated, with a note for the LLM.
+ */
+export function toTextResult(result: unknown, maxLength?: number): CallToolResult {
+	let text = result === undefined ? "null" : JSON.stringify(result, null, 2);
+	if (maxLength && text.length > maxLength) {
+		const total = text.length;
+		text =
+			text.slice(0, maxLength) +
+			`\n\n[Result truncated: ${maxLength} of ${total} characters. Use more specific ` +
+			`parameters (e.g. filters or pagination) to get a smaller result.]`;
+	}
+	return { content: [{ type: "text", text }] };
 }
 
 /**

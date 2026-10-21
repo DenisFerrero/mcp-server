@@ -20,6 +20,7 @@ import { isActionExposed, registerAutoDiscoveryTools } from "./tool-generator.js
 import { registerCustomTools } from "./custom-tools.js";
 import { BoundedEventStore } from "./event-store.js";
 import {
+	getCallOptions,
 	getForwardedMeta,
 	MCP_META_KEY,
 	registerTool,
@@ -113,14 +114,7 @@ export function McpServerMixin(
 					const nodes = broker.registry.getNodeList(
 						params as RegistryListOptions<"getNodeList">
 					);
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify(nodes, null, 2)
-							}
-						]
-					};
+					return toTextResult(nodes, mixinOptions!.maxResultLength);
 				}
 			);
 
@@ -174,14 +168,7 @@ export function McpServerMixin(
 					const services = broker.registry.getServiceList(
 						params as RegistryListOptions<"getServiceList">
 					);
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify(services, null, 2)
-							}
-						]
-					};
+					return toTextResult(services, mixinOptions!.maxResultLength);
 				}
 			);
 
@@ -227,14 +214,7 @@ export function McpServerMixin(
 					const actions = broker.registry
 						.getActionList(params as RegistryListOptions<"getActionList">)
 						.filter(entry => isActionExposed(entry, mixinOptions!));
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify(actions, null, 2)
-							}
-						]
-					};
+					return toTextResult(actions, mixinOptions!.maxResultLength);
 				}
 			);
 
@@ -278,14 +258,7 @@ export function McpServerMixin(
 					const events = broker.registry.getEventList(
 						params as RegistryListOptions<"getEventList">
 					);
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify(events, null, 2)
-							}
-						]
-					};
+					return toTextResult(events, mixinOptions!.maxResultLength);
 				}
 			);
 		} // end exposeBrokerTools
@@ -342,10 +315,12 @@ export function McpServerMixin(
 						}
 					}
 					try {
-						const result = await broker.call(action, actionParams, {
-							meta: getForwardedMeta(extra)
-						});
-						return toTextResult(result);
+						const result = await broker.call(
+							action,
+							actionParams,
+							getCallOptions(mixinOptions!, extra)
+						);
+						return toTextResult(result, mixinOptions!.maxResultLength);
 					} catch (err) {
 						logger.error("Error calling action:", err);
 						return toErrorResult(err);
@@ -429,7 +404,7 @@ export function McpServerMixin(
 		} // end exposeGenericTools
 
 		// Custom tools take precedence over the auto-discovered ones
-		registerCustomTools(server, broker, mixinOptions!.tools ?? []);
+		registerCustomTools(server, broker, mixinOptions!);
 
 		// Auto-discovery: register per-action tools (after the other tools, so a clashing
 		// action tool name is skipped instead of breaking the session)

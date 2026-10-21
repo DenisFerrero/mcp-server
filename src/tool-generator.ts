@@ -3,7 +3,7 @@ import Moleculer from "moleculer";
 import type { ActionSchema, ServiceBroker } from "moleculer";
 import type { McpServerMixinOptions } from "./types.js";
 import { convertActionParamsToZod } from "./schema-converter.js";
-import { getForwardedMeta, registerTool, toErrorResult, toTextResult } from "./utils.js";
+import { getCallOptions, registerTool, toErrorResult, toTextResult } from "./utils.js";
 import "./moleculer-types.js";
 
 const { match } = Moleculer.Utils;
@@ -158,9 +158,9 @@ export function registerAutoDiscoveryTools(
 						const result = await broker.call(
 							actionName,
 							isRootParams ? params.$$root : params,
-							{ meta: getForwardedMeta(extra) }
+							getCallOptions(options, extra)
 						);
-						return toTextResult(result);
+						return toTextResult(result, options.maxResultLength);
 					} catch (err: unknown) {
 						logger.error(`Error calling action ${actionName}:`, err);
 						return toErrorResult(err);

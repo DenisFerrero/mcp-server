@@ -1,5 +1,5 @@
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
-import type { ServiceBroker } from "moleculer";
+import type { CallingOptions, ServiceBroker } from "moleculer";
 import type { ApiRouteSchema } from "moleculer-web";
 import type { ZodRawShape } from "zod";
 
@@ -84,6 +84,18 @@ export interface McpServerMixinOptions {
 	 * clients gone away without a DELETE request. Set `false` to disable. Default: 30 minutes
 	 */
 	sessionTimeout?: number | false;
+
+	/**
+	 * Calling options of the actions called by the tools, e.g. `{ timeout: 10000 }`.
+	 * The forwarded meta (see `forwardMeta`) is merged into `meta`.
+	 */
+	callOptions?: CallingOptions;
+
+	/**
+	 * Max length (characters) of the text result of a tool. Longer results are truncated with
+	 * a note asking the LLM for a more specific request. Default: no limit
+	 */
+	maxResultLength?: number;
 
 	/** Max number of SSE events kept in memory per session for resumability. Default: 1000 */
 	maxStoredEvents?: number;

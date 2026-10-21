@@ -1,8 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ServiceBroker } from "moleculer";
-import type { McpCustomTool } from "./types.js";
+import type { McpServerMixinOptions } from "./types.js";
 import type { ToolHandler } from "./utils.js";
-import { getForwardedMeta, registerTool, toErrorResult, toTextResult } from "./utils.js";
+import {
+	getCallOptions,
+	getForwardedMeta,
+	registerTool,
+	toErrorResult,
+	toTextResult
+} from "./utils.js";
 
 /**
  * Register the manually declared tools.
@@ -11,11 +17,11 @@ import { getForwardedMeta, registerTool, toErrorResult, toTextResult } from "./u
 export function registerCustomTools(
 	server: McpServer,
 	broker: ServiceBroker,
-	tools: McpCustomTool[]
+	options: McpServerMixinOptions
 ): void {
 	const logger = broker.getLogger("MCP-CustomTools");
 
-	for (const def of tools) {
+	for (const def of options.tools ?? []) {
 		const handler: ToolHandler = async (params, extra) => {
 			const meta = getForwardedMeta(extra);
 			try {
@@ -23,12 +29,12 @@ export function registerCustomTools(
 				if (typeof def.handler === "function") {
 					result = await def.handler(params, broker, meta);
 				} else if (typeof def.handler === "string") {
-					result = await broker.call(def.handler, params, { meta });
+					result = await broker.call(def.handler, params, getCallOptions(options, extra));
 				} else {
 					throw new Error(`Invalid handler for tool '${def.name}'`);
 				}
 
-				const response = toTextResult(result);
+				const response = toTextResult(result, options.maxResultLength);
 				// With an output schema the SDK requires (and validates) the structured content
 				if (def.output) {
 					response.structuredContent = result as Record<string, unknown>;
