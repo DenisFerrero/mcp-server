@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 
 ### New features
 
+- **Moleculer 0.14 support** — The peer dependency is `^0.14.12 || ^0.15.0` again (0.2.0 required `^0.15.0`); use moleculer-web `^0.10.0` with Moleculer 0.14. CI runs the tests on both.
 - **Custom tools** — New `tools` option to declare tools with Zod `input`/`output` schemas, annotations and a handler (action name or function). With `output` the result is also returned as `structuredContent`.
 - **Dynamic tools refresh** — On `$services.changed` the auto-discovered tools of every open session are regenerated and clients are notified with `tools/list_changed`. Debounced by the new `refreshDebounceTime` option (default `1000`, `false` to disable).
 - **`mcp.title`** — Custom title for auto-discovered tools.

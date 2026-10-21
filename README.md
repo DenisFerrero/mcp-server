@@ -28,6 +28,13 @@ Expose your Moleculer microservices to AI assistants (Claude, GPT, etc.) via the
 npm i @moleculer/mcp-server moleculer-web
 ```
 
+Both Moleculer 0.14 and 0.15 are supported, with the matching moleculer-web version:
+
+| Moleculer | moleculer-web |
+|---|---|
+| `^0.15.0` | `^0.11.0` |
+| `^0.14.12` | `^0.10.0` |
+
 ## Quick Start
 
 Add the MCP server mixin to your API Gateway service:

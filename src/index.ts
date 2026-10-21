@@ -10,7 +10,7 @@ import { VERSION } from "./version.js";
 
 import { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import Moleculer, { ServiceBroker, ServiceSchema } from "moleculer";
+import Moleculer, { ActionSchema, ServiceBroker, ServiceSchema } from "moleculer";
 import type { ApiSettingsSchema } from "moleculer-web";
 import _ from "lodash";
 import { randomUUID } from "node:crypto";
@@ -33,10 +33,20 @@ export type { McpCustomTool, McpServerMixinOptions };
 
 const { match } = Moleculer.Utils;
 
-/** Options of the registry list methods (`getNodeList`, `getActionList`, ...) */
-type RegistryListOptions<
-	M extends "getNodeList" | "getServiceList" | "getActionList" | "getEventList"
-> = Parameters<ServiceBroker["registry"][M]>[0];
+/**
+ * The registry list methods used by the broker tools. Typed here because the Moleculer 0.14
+ * typings don't declare `getNodeList` and `getEventList` (they exist at runtime).
+ */
+interface RegistryLists {
+	getNodeList(opts?: object): unknown;
+	getServiceList(opts?: object): unknown;
+	getActionList(opts?: object): Array<{ name: string; action?: ActionSchema }>;
+	getEventList(opts?: object): unknown;
+}
+
+function getRegistry(broker: ServiceBroker): RegistryLists {
+	return broker.registry as unknown as RegistryLists;
+}
 
 /** An open MCP session: its server and the auto-discovered tools registered on it */
 interface McpSession {
@@ -111,9 +121,7 @@ export function McpServerMixin(
 				},
 				async params => {
 					logger.debug("Listing Moleculer nodes...", params);
-					const nodes = broker.registry.getNodeList(
-						params as RegistryListOptions<"getNodeList">
-					);
+					const nodes = getRegistry(broker).getNodeList(params);
 					return toTextResult(nodes, mixinOptions!.maxResultLength);
 				}
 			);
@@ -165,9 +173,7 @@ export function McpServerMixin(
 				},
 				async params => {
 					logger.debug("Listing Moleculer services...", params);
-					const services = broker.registry.getServiceList(
-						params as RegistryListOptions<"getServiceList">
-					);
+					const services = getRegistry(broker).getServiceList(params);
 					return toTextResult(services, mixinOptions!.maxResultLength);
 				}
 			);
@@ -211,8 +217,8 @@ export function McpServerMixin(
 				async params => {
 					logger.debug("Listing Moleculer actions...", params);
 					// Same filters of `moleculer_call_action`: don't list what can't be called
-					const actions = broker.registry
-						.getActionList(params as RegistryListOptions<"getActionList">)
+					const actions = getRegistry(broker)
+						.getActionList(params)
 						.filter(entry => isActionExposed(entry, mixinOptions!));
 					return toTextResult(actions, mixinOptions!.maxResultLength);
 				}
@@ -255,9 +261,7 @@ export function McpServerMixin(
 				},
 				async params => {
 					logger.debug("Listing Moleculer events...", params);
-					const events = broker.registry.getEventList(
-						params as RegistryListOptions<"getEventList">
-					);
+					const events = getRegistry(broker).getEventList(params);
 					return toTextResult(events, mixinOptions!.maxResultLength);
 				}
 			);

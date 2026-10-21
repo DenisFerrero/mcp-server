@@ -28,7 +28,7 @@ jobs:
     strategy:
       matrix:
         node-version: [20.x, 22.x, 24.x]
-        adapter: ["Redis"]
+        moleculer: ["0.15", "0.14"]
       fail-fast: false
     steps:
     - uses: actions/checkout@v4
@@ -40,6 +40,13 @@ jobs:
 
     - name: Install dependencies
       run: npm ci
+
+    - name: Install Moleculer 0.14 and moleculer-web 0.10
+      if: matrix.moleculer == '0.14'
+      run: npm install --no-save moleculer@^0.14.36 moleculer-web@^0.10.8
+
+    - name: Type check
+      run: npm run check
 
     - name: Run integration tests
       run: npm run test

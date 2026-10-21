@@ -117,7 +117,7 @@ describe("MCP Server Integration Tests", () => {
 		expect(broker.started).toBe(true);
 
 		// Verify services are registered
-		const services = broker.registry.getServiceList();
+		const services = broker.registry.getServiceList({});
 		const serviceNames = services.map(s => s.name);
 
 		expect(serviceNames).toContain("api");

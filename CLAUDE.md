@@ -83,7 +83,8 @@ npm run dev       # nodemon with MCP inspector
 
 ## Tech Stack
 
-- TypeScript 5.9, Node.js >= 20
+- TypeScript 6, Node.js >= 20
 - `@modelcontextprotocol/sdk` ^1.18.0, `zod` ^3.25, `lodash`
-- `moleculer` ^0.14.12 || ^0.15.0 (peerDep)
+- `moleculer` ^0.14.12 || ^0.15.0 (peerDep); CI also runs the tests with moleculer 0.14 + moleculer-web 0.10
+- The Moleculer 0.14 typings miss some registry methods: use `getRegistry()` in `src/index.ts`
 - Test: Vitest + @vitest/coverage-v8
