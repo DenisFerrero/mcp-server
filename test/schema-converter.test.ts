@@ -255,3 +255,78 @@ describe("convertActionParamsToZod", () => {
 		expect(result.age.parse(undefined)).toBeUndefined();
 	});
 });
+
+describe("fork additions", () => {
+	it("pipe syntax with key:value options", () => {
+		const result = convertFastestValidatorToZod({
+			name: "string|min:3|max:5",
+			age: "number|integer|min:18",
+			nick: "string|nullable|optional"
+		});
+		expect(result.name.parse("abcd")).toBe("abcd");
+		expect(() => result.name.parse("ab")).toThrow();
+		expect(() => result.name.parse("abcdef")).toThrow();
+		expect(result.age.parse(18)).toBe(18);
+		expect(() => result.age.parse(17)).toThrow();
+		expect(result.nick.parse(null)).toBeNull();
+		expect(result.nick.parse(undefined)).toBeUndefined();
+	});
+
+	it("$$root with pipe syntax", () => {
+		const result = convertActionParamsToZod("string|min:3");
+		expect(result.$$root.parse("abc")).toBe("abc");
+		expect(() => result.$$root.parse("ab")).toThrow();
+	});
+
+	it("description is forwarded to the schema", () => {
+		const result = convertFastestValidatorToZod({
+			city: { type: "string", description: "Name of the city" }
+		});
+		expect(result.city.description).toBe("Name of the city");
+	});
+
+	it("nullable", () => {
+		const result = convertFastestValidatorToZod({ value: { type: "number", nullable: true } });
+		expect(result.value.parse(null)).toBeNull();
+		expect(() => result.value.parse(undefined)).toThrow();
+	});
+
+	it("uuid", () => {
+		const result = convertFastestValidatorToZod({ id: "uuid" });
+		expect(result.id.parse("2f1e6a1c-6a3b-4c1e-9a7f-1b2c3d4e5f60")).toBeDefined();
+		expect(() => result.id.parse("not-a-uuid")).toThrow();
+	});
+
+	it("multi rule (explicit and array shorthand)", () => {
+		const result = convertFastestValidatorToZod({
+			a: { type: "multi", rules: ["string", "number"] },
+			b: [{ type: "string" }, { type: "boolean" }]
+		});
+		expect(result.a.parse("x")).toBe("x");
+		expect(result.a.parse(1)).toBe(1);
+		expect(() => result.a.parse(true)).toThrow();
+		expect(result.b.parse(true)).toBe(true);
+		expect(() => result.b.parse(1)).toThrow();
+	});
+
+	it("object with `properties` alias", () => {
+		const result = convertFastestValidatorToZod({
+			user: { type: "object", properties: { name: "string" } }
+		});
+		expect(result.user.parse({ name: "John" })).toEqual({ name: "John" });
+		expect(() => result.user.parse({ name: 1 })).toThrow();
+	});
+
+	it("array and string length constraints", () => {
+		const result = convertFastestValidatorToZod({
+			tags: { type: "array", items: "string", min: 1, max: 2 },
+			code: { type: "string", length: 3 },
+			text: { type: "string", empty: false }
+		});
+		expect(() => result.tags.parse([])).toThrow();
+		expect(() => result.tags.parse(["a", "b", "c"])).toThrow();
+		expect(result.tags.parse(["a"])).toEqual(["a"]);
+		expect(() => result.code.parse("ab")).toThrow();
+		expect(() => result.text.parse("")).toThrow();
+	});
+});

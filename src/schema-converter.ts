@@ -36,6 +36,12 @@ function convertSingleField(def: ValidatorDef): ZodTypeAny {
 		case "url":
 			schema = z.string().url();
 			break;
+		case "uuid":
+			schema = z.string().uuid();
+			break;
+		case "multi":
+			schema = buildMulti(def.rules);
+			break;
 		case "any":
 			schema = z.any();
 			break;
@@ -44,6 +50,13 @@ function convertSingleField(def: ValidatorDef): ZodTypeAny {
 			break;
 	}
 
+	// The description is the only hint the LLM gets about the meaning of a field
+	if (typeof def.description === "string") {
+		schema = schema.describe(def.description);
+	}
+	if (def.nullable === true) {
+		schema = schema.nullable();
+	}
 	if (def.default !== undefined) {
 		schema = schema.default(def.default);
 	}
@@ -56,6 +69,8 @@ function convertSingleField(def: ValidatorDef): ZodTypeAny {
 
 function buildString(def: ValidatorDef): ZodTypeAny {
 	let s = z.string();
+	if (def.empty === false) s = s.min(1);
+	if (def.length != null) s = s.length(def.length);
 	if (def.min != null) s = s.min(def.min);
 	if (def.max != null) s = s.max(def.max);
 	if (def.pattern) s = s.regex(new RegExp(def.pattern));
@@ -82,13 +97,20 @@ function buildNumber(def: ValidatorDef): ZodTypeAny {
 
 function buildArray(def: ValidatorDef): ZodTypeAny {
 	const itemSchema = def.items ? parseFieldDef(def.items) : z.any();
-	return z.array(itemSchema);
+	let a = z.array(itemSchema);
+	if (def.empty === false) a = a.min(1);
+	if (def.length != null) a = a.length(def.length);
+	if (def.min != null) a = a.min(def.min);
+	if (def.max != null) a = a.max(def.max);
+	return a;
 }
 
 function buildObject(def: ValidatorDef): ZodTypeAny {
-	if (def.props) {
+	// fastest-validator accepts both `props` and `properties`
+	const props = def.props ?? def.properties;
+	if (props) {
 		const shape: Record<string, ZodTypeAny> = {};
-		for (const [key, val] of Object.entries(def.props)) {
+		for (const [key, val] of Object.entries(props)) {
 			shape[key] = parseFieldDef(val);
 		}
 		return z.object(shape);
@@ -106,12 +128,34 @@ function buildEnum(def: ValidatorDef): ZodTypeAny {
 	return z.any();
 }
 
+function buildMulti(rules: unknown): ZodTypeAny {
+	if (!Array.isArray(rules) || rules.length === 0) return z.any();
+	if (rules.length === 1) return parseFieldDef(rules[0]);
+	const schemas = rules.map(rule => parseFieldDef(rule));
+	return z.union(schemas as [ZodTypeAny, ZodTypeAny, ...ZodTypeAny[]]);
+}
+
+function parsePipeValue(value: string): unknown {
+	if (value === "true") return true;
+	if (value === "false") return false;
+	const num = Number(value);
+	return value !== "" && !isNaN(num) ? num : value;
+}
+
 function parsePipeSyntax(pipe: string): ValidatorDef {
 	const parts = pipe.split("|");
 	const type = parts[0];
 	const def: ValidatorDef = { type };
 	for (let i = 1; i < parts.length; i++) {
 		const part = parts[i];
+
+		// `key:value` options, e.g. "string|min:3|max:10"
+		const sep = part.indexOf(":");
+		if (sep > 0) {
+			def[part.slice(0, sep)] = parsePipeValue(part.slice(sep + 1));
+			continue;
+		}
+
 		switch (part) {
 			case "integer":
 				def.integer = true;
@@ -134,6 +178,8 @@ function parsePipeSyntax(pipe: string): ValidatorDef {
 				else def.type = "url";
 				break;
 			default:
+				// Any other flag, e.g. "nullable", "empty:false" is handled above
+				def[part] = true;
 				break;
 		}
 	}
@@ -147,8 +193,17 @@ function parseFieldDef(field: unknown): ZodTypeAny {
 		}
 		return convertSingleField({ type: field });
 	}
+	// An array of rules is the fastest-validator shorthand for a "multi" rule
+	if (Array.isArray(field)) {
+		return buildMulti(field);
+	}
 	if (typeof field === "object" && field !== null) {
-		return convertSingleField(field as ValidatorDef);
+		const def = field as ValidatorDef;
+		// e.g. `{ $$root: true, type: "string|min:3" }`
+		if (typeof def.type === "string" && def.type.includes("|")) {
+			return convertSingleField({ ...def, ...parsePipeSyntax(def.type) });
+		}
+		return convertSingleField(def);
 	}
 	return z.any();
 }
