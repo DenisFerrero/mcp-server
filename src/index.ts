@@ -19,10 +19,21 @@ import type { McpCustomTool, McpServerMixinOptions } from "./types.js";
 import { isActionExposed, registerAutoDiscoveryTools } from "./tool-generator.js";
 import { registerCustomTools } from "./custom-tools.js";
 import { BoundedEventStore } from "./event-store.js";
-import { getForwardedMeta, MCP_META_KEY, toErrorResult, toTextResult } from "./utils.js";
+import {
+	getForwardedMeta,
+	MCP_META_KEY,
+	registerTool,
+	toErrorResult,
+	toTextResult
+} from "./utils.js";
 import "./moleculer-types.js";
 
 export type { McpCustomTool, McpServerMixinOptions };
+
+/** Options of the registry list methods (`getNodeList`, `getActionList`, ...) */
+type RegistryListOptions<
+	M extends "getNodeList" | "getServiceList" | "getActionList" | "getEventList"
+> = Parameters<ServiceBroker["registry"][M]>[0];
 
 /** An open MCP session: its server and the auto-discovered tools registered on it */
 interface McpSession {
@@ -70,7 +81,8 @@ export function McpServerMixin(
 		);
 
 		if (mixinOptions!.exposeBrokerTools !== false) {
-			server.registerTool(
+			registerTool(
+				server,
 				"moleculer_list_nodes",
 				{
 					title: "List Moleculer nodes",
@@ -93,10 +105,12 @@ export function McpServerMixin(
 						idempotentHint: true,
 						openWorldHint: false
 					}
-				} as any,
+				},
 				async params => {
 					logger.debug("Listing Moleculer nodes...", params);
-					const nodes = broker.registry.getNodeList(params);
+					const nodes = broker.registry.getNodeList(
+						params as RegistryListOptions<"getNodeList">
+					);
 					return {
 						content: [
 							{
@@ -108,7 +122,8 @@ export function McpServerMixin(
 				}
 			);
 
-			server.registerTool(
+			registerTool(
+				server,
 				"moleculer_list_services",
 				{
 					title: "List Moleculer services",
@@ -151,10 +166,12 @@ export function McpServerMixin(
 						idempotentHint: true,
 						openWorldHint: false
 					}
-				} as any,
+				},
 				async params => {
 					logger.debug("Listing Moleculer services...", params);
-					const services = broker.registry.getServiceList(params);
+					const services = broker.registry.getServiceList(
+						params as RegistryListOptions<"getServiceList">
+					);
 					return {
 						content: [
 							{
@@ -166,7 +183,8 @@ export function McpServerMixin(
 				}
 			);
 
-			server.registerTool(
+			registerTool(
+				server,
 				"moleculer_list_actions",
 				{
 					title: "List Moleculer actions",
@@ -199,10 +217,12 @@ export function McpServerMixin(
 						idempotentHint: true,
 						openWorldHint: false
 					}
-				} as any,
+				},
 				async params => {
 					logger.debug("Listing Moleculer actions...", params);
-					const actions = broker.registry.getActionList(params);
+					const actions = broker.registry.getActionList(
+						params as RegistryListOptions<"getActionList">
+					);
 					return {
 						content: [
 							{
@@ -214,7 +234,8 @@ export function McpServerMixin(
 				}
 			);
 
-			server.registerTool(
+			registerTool(
+				server,
 				"moleculer_list_events",
 				{
 					title: "List Moleculer events",
@@ -247,10 +268,12 @@ export function McpServerMixin(
 						idempotentHint: true,
 						openWorldHint: false
 					}
-				} as any,
+				},
 				async params => {
 					logger.debug("Listing Moleculer events...", params);
-					const events = broker.registry.getEventList(params);
+					const events = broker.registry.getEventList(
+						params as RegistryListOptions<"getEventList">
+					);
 					return {
 						content: [
 							{
@@ -264,7 +287,8 @@ export function McpServerMixin(
 		} // end exposeBrokerTools
 
 		if (mixinOptions!.exposeGenericTools !== false) {
-			server.registerTool(
+			registerTool(
+				server,
 				"moleculer_call_action",
 				{
 					title: "Call Action",
@@ -284,28 +308,27 @@ export function McpServerMixin(
 						idempotentHint: false,
 						openWorldHint: true
 					}
-				} as any,
-				async (params: Record<string, any>, extra) => {
+				},
+				async (params, extra) => {
 					logger.debug("Calling Moleculer action...", params);
 					if (!params.action) {
 						throw new Error("action parameter is required");
 					}
+					const action = params.action as string;
 
 					// The generic tool must not bypass the filters of the auto-discovered tools.
 					// Unknown actions are still called, to get the usual ServiceNotFoundError.
-					const entry = broker.registry
-						.getActionList({})
-						.find(a => a.name === params.action);
+					const entry = broker.registry.getActionList({}).find(a => a.name === action);
 					if (entry && !isActionExposed(entry, mixinOptions!)) {
 						return toErrorResult(
-							new Error(`Action '${params.action}' is not exposed via MCP`)
+							new Error(`Action '${action}' is not exposed via MCP`)
 						);
 					}
 
 					let actionParams = {};
 					if (params.jsonParams) {
 						try {
-							actionParams = JSON.parse(params.jsonParams);
+							actionParams = JSON.parse(params.jsonParams as string);
 						} catch (err) {
 							throw new Error(
 								"The 'jsonParams' must be a valid JSON object string: " +
@@ -315,7 +338,7 @@ export function McpServerMixin(
 						}
 					}
 					try {
-						const result = await broker.call(params.action, actionParams, {
+						const result = await broker.call(action, actionParams, {
 							meta: getForwardedMeta(extra)
 						});
 						return toTextResult(result);
@@ -326,7 +349,8 @@ export function McpServerMixin(
 				}
 			);
 
-			server.registerTool(
+			registerTool(
+				server,
 				"moleculer_emit_event",
 
 				{
@@ -352,17 +376,18 @@ export function McpServerMixin(
 						idempotentHint: false,
 						openWorldHint: true
 					}
-				} as any,
-				async (params: Record<string, any>, extra) => {
+				},
+				async (params, extra) => {
 					logger.debug("Emitting Moleculer event...", params);
 					if (!params.event) {
 						throw new Error("event parameter is required");
 					}
+					const event = params.event as string;
 
 					let eventParams = {};
 					if (params.jsonParams) {
 						try {
-							eventParams = JSON.parse(params.jsonParams);
+							eventParams = JSON.parse(params.jsonParams as string);
 						} catch (err) {
 							throw new Error(
 								"The 'jsonParams' must be a valid JSON object string: " +
@@ -374,15 +399,15 @@ export function McpServerMixin(
 					try {
 						const opts = { meta: getForwardedMeta(extra) };
 						if (params.broadcast) {
-							await broker.broadcast(params.event, eventParams, opts);
+							await broker.broadcast(event, eventParams, opts);
 						} else {
-							await broker.emit(params.event, eventParams, opts);
+							await broker.emit(event, eventParams, opts);
 						}
 						return {
 							content: [
 								{
 									type: "text",
-									text: `Event '${params.event}' emitted successfully`
+									text: `Event '${event}' emitted successfully`
 								}
 							]
 						};

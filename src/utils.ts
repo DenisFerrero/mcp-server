@@ -1,5 +1,37 @@
+import type { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
+import type { ZodRawShape } from "zod";
+
+/** Configuration of a MCP tool */
+export interface ToolConfig {
+	title?: string;
+	description?: string;
+	inputSchema?: ZodRawShape;
+	outputSchema?: ZodRawShape;
+	annotations?: ToolAnnotations;
+}
+
+/** Handler of a MCP tool: validated params and the SDK request `extra` */
+export type ToolHandler = (
+	params: Record<string, unknown>,
+	extra: { authInfo?: AuthInfo }
+) => CallToolResult | Promise<CallToolResult>;
+
+/**
+ * Register a tool on the MCP server.
+ * Wraps `McpServer.registerTool`, whose typings hit the Zod 3.25 deep type inference
+ * limit ("Type instantiation is excessively deep") with dynamic schemas.
+ */
+export function registerTool(
+	server: McpServer,
+	name: string,
+	config: ToolConfig,
+	handler: ToolHandler
+): RegisteredTool {
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	return server.registerTool(name, config as any, handler as any);
+}
 
 /** Key of `AuthInfo.extra` where the mixin stores the meta forwarded from the HTTP request */
 export const MCP_META_KEY = "moleculerMeta";

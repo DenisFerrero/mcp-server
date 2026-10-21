@@ -1,7 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ServiceBroker } from "moleculer";
 import type { McpCustomTool } from "./types.js";
-import { getForwardedMeta, toErrorResult, toTextResult } from "./utils.js";
+import type { ToolHandler } from "./utils.js";
+import { getForwardedMeta, registerTool, toErrorResult, toTextResult } from "./utils.js";
 
 /**
  * Register the manually declared tools.
@@ -15,7 +16,7 @@ export function registerCustomTools(
 	const logger = broker.getLogger("MCP-CustomTools");
 
 	for (const def of tools) {
-		const handler = async (params: Record<string, unknown>, extra) => {
+		const handler: ToolHandler = async (params, extra) => {
 			const meta = getForwardedMeta(extra);
 			try {
 				let result: unknown;
@@ -40,7 +41,8 @@ export function registerCustomTools(
 		};
 
 		try {
-			server.registerTool(
+			registerTool(
+				server,
 				def.name,
 				{
 					title: def.title,
@@ -49,7 +51,7 @@ export function registerCustomTools(
 					inputSchema: def.input ?? {},
 					outputSchema: def.output,
 					annotations: def.annotations
-				} as any, // Zod 3.25 deep type inference issue with MCP SDK registerTool
+				},
 				handler
 			);
 		} catch (err) {

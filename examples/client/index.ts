@@ -1,5 +1,5 @@
+/* eslint-disable @/no-console */
 import { Client } from "@modelcontextprotocol/sdk/client";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 const mcp = new Client(
