@@ -88,7 +88,7 @@ export function McpServerMixin(
 					}
 				} as any,
 				async params => {
-					logger.info("Listing Moleculer nodes...", params);
+					logger.debug("Listing Moleculer nodes...", params);
 					const nodes = broker.registry.getNodeList(params);
 					return {
 						content: [
@@ -146,7 +146,7 @@ export function McpServerMixin(
 					}
 				} as any,
 				async params => {
-					logger.info("Listing Moleculer services...", params);
+					logger.debug("Listing Moleculer services...", params);
 					const services = broker.registry.getServiceList(params);
 					return {
 						content: [
@@ -194,7 +194,7 @@ export function McpServerMixin(
 					}
 				} as any,
 				async params => {
-					logger.info("Listing Moleculer actions...", params);
+					logger.debug("Listing Moleculer actions...", params);
 					const actions = broker.registry.getActionList(params);
 					return {
 						content: [
@@ -242,7 +242,7 @@ export function McpServerMixin(
 					}
 				} as any,
 				async params => {
-					logger.info("Listing Moleculer events...", params);
+					logger.debug("Listing Moleculer events...", params);
 					const events = broker.registry.getEventList(params);
 					return {
 						content: [
@@ -279,7 +279,7 @@ export function McpServerMixin(
 					}
 				} as any,
 				async (params: Record<string, any>, extra) => {
-					logger.info("Calling Moleculer action...", params);
+					logger.debug("Calling Moleculer action...", params);
 					if (!params.action) {
 						throw new Error("action parameter is required");
 					}
@@ -347,7 +347,7 @@ export function McpServerMixin(
 					}
 				} as any,
 				async (params: Record<string, any>, extra) => {
-					logger.info("Emitting Moleculer event...", params);
+					logger.debug("Emitting Moleculer event...", params);
 					if (!params.event) {
 						throw new Error("event parameter is required");
 					}
@@ -453,7 +453,7 @@ export function McpServerMixin(
 			const route = _.defaultsDeep(mixinOptions?.routeOptions, {
 				aliases: {
 					async "POST /"(req, res) {
-						this.logger.info("Received MCP POST request");
+						this.logger.debug("Received MCP POST request");
 						try {
 							// Check for existing session ID
 							const sessionId = req.headers["mcp-session-id"] as string | undefined;
@@ -531,7 +531,7 @@ export function McpServerMixin(
 					},
 
 					async "GET /"(req, res) {
-						this.logger.info("Received MCP GET request");
+						this.logger.debug("Received MCP GET request");
 						const sessionId = req.headers["mcp-session-id"] as string | undefined;
 						if (!sessionId || !this.transports.has(sessionId)) {
 							res.statusCode = 400;
