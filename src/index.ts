@@ -442,6 +442,52 @@ export function McpServerMixin(
 			 * route `authenticate` method) available to the tool handlers, through the
 			 * `authInfo` that the MCP SDK passes in the handler `extra` argument.
 			 */
+			/**
+			 * Protection against DNS rebinding attacks, as required by the MCP specification:
+			 * reject requests with a `Host` or `Origin` header not in `allowedHosts` /
+			 * `allowedOrigins`. Requests without `Origin` (non-browser clients) are accepted.
+			 * @returns true if the request has been rejected
+			 */
+			async rejectInvalidMcpHeaders(req, res): Promise<boolean> {
+				let error: string | null = null;
+
+				const allowedHosts = mixinOptions!.allowedHosts;
+				if (allowedHosts?.length) {
+					const host = req.headers.host as string | undefined;
+					// Entries can be given with or without the port
+					const hostname = host?.replace(/:\d+$/, "");
+					if (
+						!host ||
+						!(allowedHosts.includes(host) || allowedHosts.includes(hostname!))
+					) {
+						error = `Invalid Host header: ${host}`;
+					}
+				}
+
+				const allowedOrigins = mixinOptions!.allowedOrigins;
+				const origin = req.headers.origin as string | undefined;
+				if (
+					!error &&
+					allowedOrigins?.length &&
+					origin &&
+					!allowedOrigins.includes(origin)
+				) {
+					error = `Invalid Origin header: ${origin}`;
+				}
+
+				if (!error) return false;
+
+				this.logger.warn(`Rejected MCP request: ${error}`);
+				res.statusCode = 403;
+				await this.sendResponse(
+					req,
+					res,
+					{ jsonrpc: "2.0", error: { code: -32000, message: error }, id: null },
+					{}
+				);
+				return true;
+			},
+
 			attachMcpMeta(req) {
 				const meta = _.pick(req.$ctx?.meta ?? {}, mixinOptions!.forwardMeta ?? []);
 				if (_.isEmpty(meta)) return;
@@ -522,6 +568,7 @@ export function McpServerMixin(
 				aliases: {
 					async "POST /"(req, res) {
 						this.logger.debug("Received MCP POST request");
+						if (await this.rejectInvalidMcpHeaders(req, res)) return;
 						try {
 							// Check for existing session ID
 							const sessionId = req.headers["mcp-session-id"] as string | undefined;
@@ -605,6 +652,7 @@ export function McpServerMixin(
 
 					async "GET /"(req, res) {
 						this.logger.debug("Received MCP GET request");
+						if (await this.rejectInvalidMcpHeaders(req, res)) return;
 						const sessionId = req.headers["mcp-session-id"] as string | undefined;
 						if (!sessionId || !this.transports.has(sessionId)) {
 							res.statusCode = 400;
@@ -643,6 +691,7 @@ export function McpServerMixin(
 					},
 
 					async "DELETE /"(req, res) {
+						if (await this.rejectInvalidMcpHeaders(req, res)) return;
 						const sessionId = req.headers["mcp-session-id"] as string | undefined;
 						if (!sessionId || !this.transports.has(sessionId)) {
 							res.statusCode = 400;
@@ -696,7 +745,10 @@ export function McpServerMixin(
 				mappingPolicy: "restrict",
 
 				cors: {
-					origin: "*",
+					// Without `allowedOrigins` any origin is accepted (e.g. the MCP Inspector)
+					origin: mixinOptions!.allowedOrigins?.length
+						? mixinOptions!.allowedOrigins
+						: "*",
 					methods: ["GET", "POST", "DELETE", "OPTIONS"],
 					allowedHeaders: [
 						"Content-Type",

@@ -81,4 +81,17 @@ export interface McpServerMixinOptions {
 
 	/** Max number of SSE events kept in memory per session for resumability. Default: 1000 */
 	maxStoredEvents?: number;
+
+	/**
+	 * Allowed `Origin` header values, e.g. ["https://app.example.com"]. Requests from other
+	 * origins are rejected (DNS rebinding protection) and the route CORS allows only these.
+	 * Requests without `Origin` (non-browser clients) are always accepted. Default: any origin
+	 */
+	allowedOrigins?: string[];
+
+	/**
+	 * Allowed `Host` header values, with or without port, e.g. ["localhost", "127.0.0.1"].
+	 * Requests to other hosts are rejected (DNS rebinding protection). Default: any host
+	 */
+	allowedHosts?: string[];
 }
