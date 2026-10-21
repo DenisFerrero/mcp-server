@@ -22,7 +22,11 @@ test/
   custom-tools-refresh.test.ts  # Custom tools and dynamic refresh tests
   version.test.ts       # VERSION ↔ package.json check
   security.test.ts      # Meta forwarding, call_action filters, exposeGenericTools
-  sessions.test.ts      # Event store and idle sessions cleanup
+  sessions.test.ts      # Event store, idle sessions cleanup, shutdown
+  dns-rebinding.test.ts # allowedOrigins / allowedHosts
+  call-options.test.ts  # callOptions and maxResultLength
+  stateless.test.ts     # Stateless mode
+  annotations.test.ts   # Annotations from REST method and action names
   mcp-client.ts         # Test MCP client helper
 examples/
   index.ts              # Entry point (module selector)
@@ -65,6 +69,17 @@ npm run dev       # nodemon with MCP inspector
 - `forwardMeta` — `string[]` (default: `["user"]`) — HTTP request `ctx.meta` fields forwarded to actions/events
 - `sessionTimeout` — `number | false` (default: 30 min) — close idle sessions
 - `maxStoredEvents` — `number` (default: `1000`) — SSE events kept per session
+- `stateless` — `boolean` (default: `false`) — no sessions, a new MCP server per request
+- `allowedOrigins` / `allowedHosts` — `string[]` — DNS rebinding protection
+- `allowedEvents` — `string[]` — events allowed in moleculer_emit_event
+- `callOptions` — `CallingOptions` — options of the actions called by the tools (e.g. `timeout`)
+- `maxResultLength` — `number` — truncate longer tool results
+
+## Notes
+
+- `McpServerMixin` must come after `ApiGateway` in `mixins`.
+- The tests close clients with a DELETE (`closeMcpClient`); pass `{ terminate: false }` to simulate a client gone away.
+- `scripts/sync-version.mjs` runs on `npm version` and updates `src/version.ts`.
 
 ## Tech Stack
 

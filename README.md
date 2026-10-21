@@ -48,6 +48,10 @@ export default {
 
 That's it! The MCP server is available at `http://localhost:3000/mcp`. All your Moleculer actions are automatically exposed as MCP tools.
 
+> `McpServerMixin` must come **after** `ApiGateway` in `mixins`: it adds its route to the gateway.
+
+Before exposing the server outside localhost, read [Security](#security).
+
 ## Auto-discovery
 
 When the broker starts, the mixin scans the service registry and registers each action as an individual MCP tool. This means AI assistants get dedicated, well-typed tools instead of a single generic "call action" tool.
@@ -82,7 +86,7 @@ This automatically generates an MCP tool:
 
 Tool names are derived from the action name by replacing dots with underscores: `service.action` → `service_action`.
 
-Internal actions (prefixed with `$`) are always excluded, and so are actions whose `visibility` is not `"published"` (the default), as in the API gateway.
+Internal actions (prefixed with `$`) are always excluded, and so are actions whose `visibility` is not `"published"` (the default), as in the API gateway, and the actions of the gateway service itself (e.g. the moleculer-web `api.listAliases`).
 
 Params declared with `$$root: true` are exposed as a single `$$root` argument and unwrapped before calling the action.
 
@@ -104,7 +108,7 @@ McpServerMixin({
   // OR: services: "tools.*",
 
   // Exclude specific actions by glob pattern
-  excludeActions: ["$node.*", "api.*"],
+  excludeActions: ["admin.*"],
 
   // Show/hide built-in broker tools (list_nodes, list_services, etc.)
   // Default: true
@@ -136,7 +140,27 @@ McpServerMixin({
 
   // SSE events kept in memory per session for resumability
   // Default: 1000
-  maxStoredEvents: 1000
+  maxStoredEvents: 1000,
+
+  // Run without sessions, for several gateway instances (see "Sessions")
+  // Default: false
+  stateless: false,
+
+  // DNS rebinding protection: allowed Origin and Host headers
+  // Default: any
+  allowedOrigins: ["https://app.example.com"],
+  allowedHosts: ["localhost", "mcp.example.com"],
+
+  // Events that moleculer_emit_event can emit
+  // Default: any
+  allowedEvents: ["orders.*"],
+
+  // Calling options of the actions called by the tools
+  callOptions: { timeout: 10000 },
+
+  // Truncate tool results longer than this (characters)
+  // Default: no limit
+  maxResultLength: 50000
 })
 ```
 
@@ -153,6 +177,14 @@ McpServerMixin({
 | `forwardMeta` | `string[]` | `["user"]` | `ctx.meta` fields of the HTTP request forwarded to the called actions and events |
 | `sessionTimeout` | `number \| false` | `1800000` (30 min) | Close sessions with no requests and no open SSE stream for this time |
 | `maxStoredEvents` | `number` | `1000` | SSE events kept in memory per session to resume interrupted streams |
+| `stateless` | `boolean` | `false` | No sessions: a new MCP server per request (multi-instance gateways) |
+| `allowedOrigins` | `string[]` | any | Allowed `Origin` headers (also used for the route CORS) |
+| `allowedHosts` | `string[]` | any | Allowed `Host` headers, with or without port |
+| `allowedEvents` | `string[]` | any | Event name patterns allowed in `moleculer_emit_event` |
+| `callOptions` | `CallingOptions` | `{}` | Moleculer calling options (e.g. `timeout`) of the actions called by the tools |
+| `maxResultLength` | `number` | no limit | Max characters of a tool result; longer results are truncated with a note |
+
+If two tools end up with the same name (e.g. two actions with the same `mcp.name`), the first registered one wins and the others are skipped with a warning. Registration order: broker tools, custom tools, auto-discovered tools.
 
 ## Security
 
@@ -178,15 +210,28 @@ Custom tools with a function handler receive the forwarded meta as third argumen
 
 ### What the LLM can call
 
-- Auto-discovered tools are generated only for actions that pass all the filters: not internal (`$`), `published` visibility, not `mcp: false`, matching `services` and not matching `excludeActions`.
-- `moleculer_call_action` applies the same filters: a filtered action returns a `not exposed via MCP` error.
-- `moleculer_emit_event` can emit **any** event. Set `exposeGenericTools: false` if the LLM must not emit events or call actions by name.
+- Auto-discovered tools are generated only for actions that pass all the filters: not internal (`$`), `published` visibility, not `mcp: false`, not an action of the gateway itself, matching `services` and not matching `excludeActions`.
+- `moleculer_call_action` and `moleculer_list_actions` apply the same filters: a filtered action returns a `not exposed via MCP` error and is not listed.
+- `moleculer_emit_event` can emit any event, unless `allowedEvents` is set. Set `exposeGenericTools: false` if the LLM must not emit events or call actions by name.
+- `moleculer_list_nodes`/`_services`/`_events` describe the whole cluster: set `exposeBrokerTools: false` if that must stay private.
+- Use `callOptions` (e.g. `{ timeout: 10000 }`) to bound the calls: Moleculer calls can't be aborted when the client cancels a request.
+
+### DNS rebinding protection
+
+The MCP specification requires servers to validate the `Origin` header, so that a web page can't reach a local MCP server from the browser. Set `allowedOrigins` (and `allowedHosts` for local servers): requests with other values are rejected with `403`, and the route CORS allows only the listed origins. Requests without `Origin` (non-browser clients such as Claude Code) are always accepted.
+
+```javascript
+McpServerMixin({
+  allowedOrigins: ["http://localhost:6274"], // e.g. the MCP Inspector
+  allowedHosts: ["localhost", "127.0.0.1"]
+})
+```
 
 ### Sessions
 
-Each MCP session lives in the memory of the gateway process (use sticky sessions with multiple gateway instances). Sessions are closed on `DELETE` requests or after `sessionTimeout` without activity, and keep at most `maxStoredEvents` SSE events to resume interrupted streams.
+Each MCP session lives in the memory of the gateway process. Sessions are closed on `DELETE` requests or after `sessionTimeout` without activity, and keep at most `maxStoredEvents` SSE events to resume interrupted streams.
 
-If two tools end up with the same name (e.g. two actions with the same `mcp.name`), the first registered one wins and the others are skipped with a warning. Registration order: broker tools, custom tools, auto-discovered tools.
+With several gateway instances behind a load balancer, either use sticky sessions or set `stateless: true`: every POST request gets a new MCP server, no session ID is issued and `GET`/`DELETE` answer `405`. In this mode server-to-client notifications (e.g. `tools/list_changed`) and stream resumability are not available.
 
 ## Custom tools
 
@@ -272,7 +317,7 @@ You can also use shorthand:
 
 ## Tool Annotations
 
-MCP tool annotations help AI assistants understand the behavior of each tool. The mixin auto-detects annotations based on the action's REST method:
+MCP tool annotations help AI assistants understand the behavior of each tool. The mixin auto-detects annotations based on the action's REST method or, for actions without `rest`, on the verb at the start of the action name:
 
 | REST Method | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
 |---|---|---|---|---|
@@ -280,6 +325,15 @@ MCP tool annotations help AI assistants understand the behavior of each tool. Th
 | `PUT` | `false` | `false` | `true` | `false` |
 | `DELETE` | `false` | `true` | `true` | `false` |
 | `POST` (or no REST) | `false` | `false` | `false` | `false` |
+
+| Action name (without `rest`) | Detected as |
+|---|---|
+| `get*`, `find*`, `list*`, `count*`, `search*`, `query*`, `fetch*`, `read*`, `resolve*`, `show*`, `describe*`, `exists*`, `has*`, `is*` | `GET` |
+| `remove*`, `delete*`, `destroy*`, `purge*`, `drop*`, `clear*` | `DELETE` |
+| `replace*`, `set*`, `put*`, `upsert*` | `PUT` |
+| anything else (e.g. `create`, `update`, `send`) | `POST` |
+
+Only whole verbs match: `getById` is `GET`, `getaway` is not.
 
 You can override auto-detected annotations using the `mcp.annotations` field:
 

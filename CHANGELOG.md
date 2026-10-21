@@ -11,6 +11,9 @@ All notable changes to this project will be documented in this file.
 - **`moleculer_call_action` applies the auto-discovery filters.** Internal (`$`), not published, `mcp: false` actions and the ones filtered by `services`/`excludeActions` return a `not exposed via MCP` error.
 - **Sessions are closed after 30 minutes of inactivity** (no requests, no open SSE stream). See `sessionTimeout`.
 - **Tool params are logged at `debug` level** (they were logged at `info`).
+- **The gateway's own actions are never exposed** (e.g. the moleculer-web `api.listAliases`, which lists all the routes).
+- **`moleculer_list_actions` lists only the actions callable through MCP.**
+- **Actions without `rest` get annotations from their name** (e.g. `find` is read-only, `remove` destructive) instead of the POST ones.
 
 ### New features
 
@@ -21,6 +24,11 @@ All notable changes to this project will be documented in this file.
 - **`exposeGenericTools` option** — Hides `moleculer_call_action` and `moleculer_emit_event`.
 - **Idle sessions cleanup** — New `sessionTimeout` option (default 30 minutes, `false` to disable).
 - **Bounded event store** — New `maxStoredEvents` option (default `1000`) for the SSE resumability store.
+- **DNS rebinding protection** — New `allowedOrigins` (also used for the route CORS) and `allowedHosts` options.
+- **`allowedEvents` option** — Event name patterns that `moleculer_emit_event` can emit.
+- **`callOptions` option** — Moleculer calling options (e.g. `timeout`) for the actions called by the tools.
+- **`maxResultLength` option** — Truncates long tool results with a note for the LLM.
+- **Stateless mode** — New `stateless` option for gateways running in several instances without sticky sessions.
 - **Schema converter** — Full pipe syntax with options (`"string|min:3|max:10"`), `description` forwarded to the schema, `nullable`, `uuid`, `multi` (also as array shorthand), `properties` alias, string `length`/`empty` and array `min`/`max`/`length`/`empty`. String format flags (`alpha`, `numeric`, `alphanum`, `alphadash`, `hex`, `base64`, `singleLine`) and the `mac`, `currency`, `luhn`, `tuple`, `record`, `equal` types are converted too: their patterns are exported to the JSON Schema, so the LLM knows the expected format.
 
 ### Fixed issues
@@ -31,6 +39,8 @@ All notable changes to this project will be documented in this file.
 - **Unbounded memory usage** — Sessions of clients gone away without a `DELETE` request were never released, and the SDK example `InMemoryEventStore` kept every SSE event forever.
 - **SSE resumability of the standalone stream** — The SDK example store could not resume the `_GET_stream`, because it extracted the stream ID splitting the event ID on `_`.
 - **Custom tools without `input`** — The handler received the SDK `extra` object in place of the params.
+- **Shutdown hanging with connected clients** — An open SSE stream kept the moleculer-web `server.close()` waiting forever, so `broker.stop()` never returned while a MCP client was connected.
+- **Cross-platform npm scripts** — `dev`, `inspect` and `build` only worked on Windows or only on POSIX shells.
 
 ## 0.2.0 (2026-03-28)
 
@@ -47,7 +57,7 @@ All notable changes to this project will be documented in this file.
 - **Action exclusion patterns** — New `excludeActions` option to exclude specific action name patterns from auto-discovery (e.g. `["$node.*"]`).
 - **`exposeBrokerTools` option** — Controls whether generic broker tools (`moleculer_list_nodes`, `moleculer_list_services`, `moleculer_list_actions`, `moleculer_list_events`) are registered. Default: `true`. When `false`, `moleculer_call_action` and `moleculer_emit_event` are still available.
 - **`toolNamePrefix` option** — Adds a prefix to auto-generated tool names (e.g. `prefix_greeter_hello` instead of `greeter_hello`).
-- **MCP annotation detection** — Auto-discovered tools get automatic `readOnlyHint`/`destructiveHint`/`idempotentHint` annotations based on action name patterns (e.g. `get*`, `list*` → readOnly; `delete*`, `remove*` → destructive). Custom annotations via `action.mcp.annotations` are merged on top.
+- **MCP annotation detection** — Auto-discovered tools get automatic `readOnlyHint`/`destructiveHint`/`idempotentHint` annotations based on the action REST method (`GET` → readOnly; `DELETE` → destructive; `PUT` → idempotent). Custom annotations via `action.mcp.annotations` are merged on top. _(This entry originally described a detection based on action names, which was not implemented in 0.2.0.)_
 - **CI/CD publish workflow** — `.github/workflows/publish.yml` for automated npm publishing with provenance on GitHub releases (trusted publisher).
 
 ### Fixed issues
