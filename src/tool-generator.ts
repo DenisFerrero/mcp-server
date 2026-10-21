@@ -1,8 +1,9 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import Moleculer from "moleculer";
 import type { ActionSchema, ServiceBroker } from "moleculer";
 import type { McpServerMixinOptions } from "./types.js";
 import { convertActionParamsToZod } from "./schema-converter.js";
+import { toErrorResult, toTextResult } from "./utils.js";
 import "./moleculer-types.js";
 
 const { match } = Moleculer.Utils;
@@ -61,6 +62,9 @@ function shouldIncludeAction(actionEntry: ActionEntry, options: McpServerMixinOp
 	const serviceName = actionName.split(".").slice(0, -1).join(".");
 	const actionDef = actionEntry.action;
 
+	// Like the API gateway, only "published" actions (the default visibility) are exposed
+	if (actionDef?.visibility && actionDef.visibility !== "published") return false;
+
 	// Check mcp: false
 	if (actionDef?.mcp === false) return false;
 	if (typeof actionDef?.mcp === "object" && actionDef.mcp.enabled === false) return false;
@@ -84,12 +88,18 @@ function shouldIncludeAction(actionEntry: ActionEntry, options: McpServerMixinOp
 	return true;
 }
 
+/**
+ * Register a MCP tool for each discovered action.
+ * Tools whose name is already registered on the server are skipped with a warning.
+ * @returns The registered tools, so they can be removed when the registry changes.
+ */
 export function registerAutoDiscoveryTools(
 	server: McpServer,
 	broker: ServiceBroker,
 	options: McpServerMixinOptions
-): void {
+): RegisteredTool[] {
 	const logger = broker.getLogger("MCP-AutoDiscovery");
+	const registered: RegisteredTool[] = [];
 	const actions: ActionEntry[] = broker.registry.getActionList({
 		skipInternal: true,
 		withEndpoints: false
@@ -123,44 +133,40 @@ export function registerAutoDiscoveryTools(
 			...(mcpMeta.annotations || {})
 		};
 
-		server.registerTool(
-			toolName,
-			{
-				title: `Call ${actionName}`,
-				description,
-				inputSchema,
-				annotations
-			} as any, // Zod 3.25 deep type inference issue with MCP SDK registerTool
-			async (params: Record<string, unknown>) => {
-				try {
-					const result = await broker.call(actionName, params);
-					return {
-						content: [
-							{
-								type: "text" as const,
-								text:
-									result === undefined ? "null" : JSON.stringify(result, null, 2)
-							}
-						]
-					};
-				} catch (err: unknown) {
-					logger.error(`Error calling action ${actionName}:`, err);
-					const errorInfo =
-						err instanceof Error
-							? { name: err.name, message: err.message, stack: err.stack }
-							: { message: String(err) };
-					return {
-						content: [
-							{
-								type: "text" as const,
-								text: `Error ${(errorInfo as { name?: string }).name || "UnknownError"}: ${errorInfo.message}\n${JSON.stringify(errorInfo, null, 2)}`
-							}
-						]
-					};
+		// `$$root` params are wrapped in an object by the converter, unwrap them before the call
+		const isRootParams = inputSchema.$$root !== undefined;
+
+		try {
+			const tool = server.registerTool(
+				toolName,
+				{
+					title: mcpMeta.title || `Call ${actionName}`,
+					description,
+					inputSchema,
+					annotations
+				} as any, // Zod 3.25 deep type inference issue with MCP SDK registerTool
+				async (params: Record<string, unknown>) => {
+					try {
+						const result = await broker.call(
+							actionName,
+							isRootParams ? params.$$root : params
+						);
+						return toTextResult(result);
+					} catch (err: unknown) {
+						logger.error(`Error calling action ${actionName}:`, err);
+						return toErrorResult(err);
+					}
 				}
-			}
-		);
+			);
+			registered.push(tool);
+		} catch (err) {
+			// e.g. two actions with the same `mcp.name`, or a name clashing with a broker tool
+			logger.warn(`Skipping tool '${toolName}' for action ${actionName}:`, err);
+			continue;
+		}
 
 		logger.info(`Registered tool: ${toolName} → ${actionName}`);
 	}
+
+	return registered;
 }

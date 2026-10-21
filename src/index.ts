@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { McpServerMixinOptions } from "./types.js";
 import { registerAutoDiscoveryTools } from "./tool-generator.js";
+import { toErrorResult, toTextResult } from "./utils.js";
 import "./moleculer-types.js";
 
 export type { McpServerMixinOptions };
@@ -49,9 +50,6 @@ export function McpServerMixin(
 				}
 			}
 		);
-
-		// Auto-discovery: register per-action tools
-		registerAutoDiscoveryTools(server, broker, mixinOptions!);
 
 		if (mixinOptions!.exposeBrokerTools !== false) {
 			server.registerTool(
@@ -287,26 +285,10 @@ export function McpServerMixin(
 				}
 				try {
 					const result = await broker.call(params.action, actionParams);
-					return {
-						content: [
-							{
-								type: "text",
-								text: JSON.stringify(result, null, 2)
-							}
-						]
-					};
+					return toTextResult(result);
 				} catch (err) {
 					logger.error("Error calling action:", err);
-					return {
-						content: [
-							{
-								type: "text",
-								text:
-									`Error ${err.name}: ${err.message}` +
-									JSON.stringify(err, null, 2)
-							}
-						]
-					};
+					return toErrorResult(err);
 				}
 			}
 		);
@@ -371,19 +353,14 @@ export function McpServerMixin(
 					};
 				} catch (err) {
 					logger.error("Error emitting event:", err);
-					return {
-						content: [
-							{
-								type: "text",
-								text:
-									`Error ${err.name}: ${err.message}` +
-									JSON.stringify(err, null, 2)
-							}
-						]
-					};
+					return toErrorResult(err);
 				}
 			}
 		);
+
+		// Auto-discovery: register per-action tools (after the broker tools, so a clashing
+		// action tool name is skipped instead of breaking the session)
+		registerAutoDiscoveryTools(server, broker, mixinOptions!);
 
 		return server;
 	}

@@ -9,13 +9,14 @@ declare module "moleculer" {
 		 * MCP metadata for this action.
 		 * - `false` — exclude from MCP tools
 		 * - `true` — include with default settings
-		 * - object — fine-grained control over tool name, description, annotations, enabled
+		 * - object — fine-grained control over tool name, title, description, annotations, enabled
 		 */
 		mcp?:
 			| boolean
 			| {
 					enabled?: boolean;
 					name?: string;
+					title?: string;
 					description?: string;
 					annotations?: Record<string, boolean>;
 			  };
