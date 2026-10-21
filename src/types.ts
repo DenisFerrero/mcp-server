@@ -55,6 +55,12 @@ export interface McpServerMixinOptions {
 	 */
 	exposeGenericTools?: boolean;
 
+	/**
+	 * Event name patterns (e.g. ["orders.*"]) that `moleculer_emit_event` can emit or broadcast.
+	 * Default: any event
+	 */
+	allowedEvents?: string[];
+
 	/** Prefix for auto-generated tool names. Default: "" */
 	toolNamePrefix?: string;
 

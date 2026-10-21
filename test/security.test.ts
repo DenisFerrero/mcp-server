@@ -211,4 +211,50 @@ describe("Security", () => {
 			}
 		});
 	});
+
+	describe("allowedEvents", () => {
+		it("should emit only the allowed events", async () => {
+			await start({ allowedEvents: ["user.*"] });
+			const mcpClient = await connect({ Authorization: "Bearer john" });
+			try {
+				const allowed = await callTool(mcpClient, "moleculer_emit_event", {
+					event: "user.seen"
+				});
+				expect(allowed.isError).toBeFalsy();
+				expect(receivedEvents).toHaveLength(1);
+
+				const blocked = await callTool(mcpClient, "moleculer_emit_event", {
+					event: "orders.deleted",
+					broadcast: true
+				});
+				expect(blocked.isError).toBe(true);
+				expect(blocked.content[0].text).toContain(
+					"Event 'orders.deleted' is not allowed via MCP"
+				);
+			} finally {
+				await closeMcpClient(mcpClient);
+			}
+		});
+	});
+
+	describe("moleculer_list_actions", () => {
+		it("should list only the actions callable through MCP", async () => {
+			await start({ excludeActions: ["whoami.*"] });
+			const mcpClient = await connect();
+			try {
+				const result = await callTool(mcpClient, "moleculer_list_actions", {});
+				const names = JSON.parse(result.content[0].text as string).map(
+					(a: { name: string }) => a.name
+				);
+				expect(names).toContain("admin.status");
+				// mcp: false, not published, excluded, internal
+				expect(names).not.toContain("admin.reset");
+				expect(names).not.toContain("admin.internal");
+				expect(names).not.toContain("whoami.get");
+				expect(names.some((n: string) => n.startsWith("$"))).toBe(false);
+			} finally {
+				await closeMcpClient(mcpClient);
+			}
+		});
+	});
 });

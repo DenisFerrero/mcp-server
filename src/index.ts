@@ -10,7 +10,7 @@ import { VERSION } from "./version.js";
 
 import { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { ServiceBroker, ServiceSchema } from "moleculer";
+import Moleculer, { ServiceBroker, ServiceSchema } from "moleculer";
 import type { ApiSettingsSchema } from "moleculer-web";
 import _ from "lodash";
 import { randomUUID } from "node:crypto";
@@ -29,6 +29,8 @@ import {
 import "./moleculer-types.js";
 
 export type { McpCustomTool, McpServerMixinOptions };
+
+const { match } = Moleculer.Utils;
 
 /** Options of the registry list methods (`getNodeList`, `getActionList`, ...) */
 type RegistryListOptions<
@@ -188,7 +190,8 @@ export function McpServerMixin(
 				"moleculer_list_actions",
 				{
 					title: "List Moleculer actions",
-					description: "List all Moleculer actions",
+					description:
+						"List the Moleculer actions that can be called through MCP (e.g. with `moleculer_call_action`)",
 					inputSchema: {
 						onlyLocal: z
 							.boolean()
@@ -220,9 +223,10 @@ export function McpServerMixin(
 				},
 				async params => {
 					logger.debug("Listing Moleculer actions...", params);
-					const actions = broker.registry.getActionList(
-						params as RegistryListOptions<"getActionList">
-					);
+					// Same filters of `moleculer_call_action`: don't list what can't be called
+					const actions = broker.registry
+						.getActionList(params as RegistryListOptions<"getActionList">)
+						.filter(entry => isActionExposed(entry, mixinOptions!));
 					return {
 						content: [
 							{
@@ -383,6 +387,11 @@ export function McpServerMixin(
 						throw new Error("event parameter is required");
 					}
 					const event = params.event as string;
+
+					const allowedEvents = mixinOptions!.allowedEvents;
+					if (allowedEvents && !allowedEvents.some(pattern => match(event, pattern))) {
+						return toErrorResult(new Error(`Event '${event}' is not allowed via MCP`));
+					}
 
 					let eventParams = {};
 					if (params.jsonParams) {
