@@ -608,6 +608,13 @@ export function McpServerMixin(
 			this.transports = new Map<string, StreamableHTTPServerTransport>();
 			this.mcpSessions = new Map<string, McpSession>();
 
+			// The gateway's own actions (e.g. the moleculer-web `listAliases`, which lists all
+			// the routes) are infrastructure, not tools: never expose them
+			mixinOptions!.excludeActions = _.uniq([
+				...(mixinOptions!.excludeActions ?? []),
+				`${this.fullName}.*`
+			]);
+
 			if (mixinOptions!.refreshDebounceTime !== false) {
 				this.debouncedRefreshMcpTools = _.debounce(
 					() => this.refreshMcpTools(),

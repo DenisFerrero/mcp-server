@@ -257,4 +257,24 @@ describe("Security", () => {
 			}
 		});
 	});
+
+	describe("Gateway actions", () => {
+		it("should never expose the actions of the gateway service itself", async () => {
+			await start();
+			const mcpClient = await connect();
+			try {
+				const toolNames = (await listTools(mcpClient)).map(t => t.name);
+				expect(toolNames).not.toContain("api_listAliases");
+				expect(toolNames).toContain("admin_status");
+
+				const result = await callTool(mcpClient, "moleculer_call_action", {
+					action: "api.listAliases"
+				});
+				expect(result.isError).toBe(true);
+				expect(result.content[0].text).toContain("is not exposed via MCP");
+			} finally {
+				await closeMcpClient(mcpClient);
+			}
+		});
+	});
 });
