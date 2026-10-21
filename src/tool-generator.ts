@@ -33,6 +33,35 @@ function getRestMethod(rest: unknown): string | null {
 	return null;
 }
 
+// Fallback for actions without `rest`: the HTTP method implied by the action name
+// (last segment, e.g. `find` in `products.find`), as in the @moleculer/database conventions
+const NAME_METHODS: Array<[RegExp, string]> = [
+	[
+		/^(get|find|list|count|search|query|fetch|read|resolve|show|describe|exists|has|is)([A-Z_]|$)/,
+		"GET"
+	],
+	[/^(remove|delete|destroy|purge|drop|clear)([A-Z_]|$)/, "DELETE"],
+	[/^(replace|set|put|upsert)([A-Z_]|$)/, "PUT"]
+];
+
+function getMethodFromName(actionName: string): string | null {
+	const name = actionName.split(".").pop() ?? "";
+	for (const [pattern, method] of NAME_METHODS) {
+		if (pattern.test(name)) return method;
+	}
+	return null;
+}
+
+/**
+ * Tool annotations detected from the action REST method or, without `rest`, from its name.
+ */
+export function detectActionAnnotations(
+	actionName: string,
+	actionDef: ActionSchema
+): Record<string, boolean> {
+	return detectAnnotations(getRestMethod(actionDef.rest) ?? getMethodFromName(actionName));
+}
+
 function detectAnnotations(restMethod: string | null): Record<string, boolean> {
 	const annotations: Record<string, boolean> = { openWorldHint: false };
 
@@ -134,7 +163,7 @@ export function registerAutoDiscoveryTools(
 		const inputSchema = convertActionParamsToZod(actionDef.params);
 
 		// Annotations: merge auto-detected with explicit overrides
-		const detectedAnnotations = detectAnnotations(getRestMethod(actionDef.rest));
+		const detectedAnnotations = detectActionAnnotations(actionName, actionDef);
 		const annotations = {
 			...detectedAnnotations,
 			...(mcpMeta.annotations || {})
