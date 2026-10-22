@@ -4,6 +4,7 @@
 [![NPM version](https://badgen.net/npm/v/@moleculer/mcp-server)](https://www.npmjs.com/package/@moleculer/mcp-server)
 
 # @moleculer/mcp-server
+
 MCP server mixin for Moleculer API Gateway (moleculer-web).
 
 Expose your Moleculer microservices to AI assistants (Claude, GPT, etc.) via the [Model Context Protocol](https://modelcontextprotocol.io/).
@@ -14,13 +15,16 @@ Expose your Moleculer microservices to AI assistants (Claude, GPT, etc.) via the
 
 - **Auto-discovery** — Moleculer actions are automatically registered as MCP tools with proper schemas
 - **Schema conversion** — fastest-validator params are converted to Zod schemas automatically
-- **Tool annotations** — REST method-based auto-detection of `readOnlyHint`, `destructiveHint`, `idempotentHint`
+- **Tool annotations** — Auto-detection of `readOnlyHint`, `destructiveHint`, `idempotentHint` from the REST method or the action name
 - **Service filtering** — Whitelist services or exclude specific actions via glob patterns
 - **MCP metadata** — Fine-grained control over tool name, title, description, and annotations per action
 - **Custom tools** — Declare extra tools with Zod input/output schemas, backed by an action or a function
-- **Dynamic refresh** — Open sessions get the tools of services started after they connected
+- **Dynamic refresh** — Open sessions get the tools of services started (or stopped) after they connected
 - **Built-in broker tools** — List nodes, services, actions, events + generic call/emit tools
-- **Streamable HTTP transport** — Standards-compliant MCP server with session management and resumability
+- **Authentication** — Protect the route as any moleculer-web route; the authenticated user is forwarded to the actions
+- **Request ID and tracing** — Tool calls share the `requestID` of the HTTP request and, with tracing enabled, are child spans of it
+- **Streamable HTTP transport** — Standards-compliant MCP server with session management, resumability and DNS rebinding protection
+- **Stateless mode** — No sessions, for gateways running in several instances without sticky sessions
 
 ## Install
 
@@ -31,7 +35,7 @@ npm i @moleculer/mcp-server moleculer-web
 Requires Node.js 22.12 or newer. Both Moleculer 0.14 and 0.15 are supported, with the matching moleculer-web version:
 
 | Moleculer | moleculer-web |
-|---|---|
+| --- | --- |
 | `^0.15.0` | `^0.11.0` |
 | `^0.14.12` | `^0.10.0` |
 
@@ -61,7 +65,7 @@ Before exposing the server outside localhost, read [Security](#security).
 
 ## Auto-discovery
 
-When the broker starts, the mixin scans the service registry and registers each action as an individual MCP tool. This means AI assistants get dedicated, well-typed tools instead of a single generic "call action" tool.
+The mixin scans the service registry and registers each action as an individual MCP tool, on every session (or, in stateless mode, every request). This means AI assistants get dedicated, well-typed tools instead of a single generic "call action" tool.
 
 **Example:** A `weather.forecast` action becomes a `weather_forecast` MCP tool with its own input schema and description.
 
@@ -86,20 +90,23 @@ export default {
 ```
 
 This automatically generates an MCP tool:
+
 - **Name:** `weather_forecast`
 - **Description:** `"Get weather forecast for a city"`
 - **Input schema:** `{ city: z.string(), days: z.number().default(3) }`
 - **Annotations:** `{ readOnlyHint: true, idempotentHint: true, destructiveHint: false, openWorldHint: false }` (auto-detected from `GET`)
 
-Tool names are derived from the action name by replacing dots with underscores: `service.action` → `service_action`.
+Tool names are derived from the action name by replacing dots (and any other character not valid in a MCP tool name: only letters, digits, `_` and `-` are) with underscores: `service.action` → `service_action`, `v2.users.get` → `v2_users_get`. `toolNamePrefix` is prepended, `mcp.name` replaces the whole name.
 
-Internal actions (prefixed with `$`) are always excluded, and so are actions whose `visibility` is not `"published"` (the default), as in the API gateway, and the actions of every moleculer-web gateway of the cluster, this one included (e.g. `api.listAliases`, which lists all the routes).
+Internal actions (prefixed with `$`) are always excluded, and so are actions whose `visibility` is not `"published"` (the default), as in the API gateway, and the actions of every moleculer-web gateway of the cluster, this one included (e.g. `api.listAliases`, which lists all the routes). The actions of stopped services, which the registry keeps without endpoints, are not exposed either.
 
 Params declared with `$$root: true` are exposed as a single `$$root` argument and unwrapped before calling the action.
 
 ### Dynamic refresh
 
-When services join or leave the cluster (`$services.changed`), the auto-discovered tools of every open MCP session are regenerated and the clients receive a `notifications/tools/list_changed` notification. The refresh is debounced by `refreshDebounceTime` (default `1000` ms); set it to `false` to keep the tools fixed for the whole session.
+When services join or leave the cluster (`$services.changed`), the auto-discovered tools of every open MCP session are regenerated and the clients receive a `notifications/tools/list_changed` notification. The refresh is debounced by `refreshDebounceTime` (default `1000` ms); set it to `false` to keep the tools fixed for the whole session. New sessions and stateless requests always get the current tools.
+
+The converted tools are cached and shared by all the sessions until the next `$services.changed`, so the schemas of the actions are not converted again for every session or request.
 
 ## Configuration Options
 
@@ -176,7 +183,7 @@ McpServerMixin({
 ```
 
 | Option | Type | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `routeOptions` | `Partial<ApiRouteSchema>` | `{ path: "/mcp" }` | moleculer-web route configuration. The MCP aliases, the CORS methods/headers needed by MCP and `bodyParsers.json: false` are always added |
 | `services` | `string \| string[]` | `undefined` | Whitelist of service names or glob pattern |
 | `excludeActions` | `string[]` | `undefined` | Action name patterns to exclude |
@@ -196,7 +203,7 @@ McpServerMixin({
 | `callOptions` | `CallingOptions` | `{}` | Moleculer calling options (e.g. `timeout`) of the actions called by the tools |
 | `maxResultLength` | `number` | no limit | Max characters of a tool result; longer results are truncated with a note |
 
-If two tools end up with the same name (e.g. two actions with the same `mcp.name`), the first registered one wins and the others are skipped with a warning. Registration order: broker tools, custom tools, auto-discovered tools.
+If two tools end up with the same name (e.g. two actions with the same `mcp.name`), the first registered one wins and the others are skipped with a warning. Registration order: broker tools, generic tools (`moleculer_call_action`, `moleculer_emit_event`), custom tools, auto-discovered tools.
 
 ## Security
 
@@ -252,13 +259,15 @@ Each MCP session lives in the memory of the gateway process. Sessions are closed
 
 `maxSessions` (default `100`) bounds the open sessions, so clients that open sessions without closing them (or an attacker doing it on purpose) can't exhaust the memory: over the limit, new sessions are rejected with `503` until a session is closed, while the open ones keep working. Each session has its own MCP server with all the tools: about 0.5 MB with 25 tools (measured), more with more tools, plus up to `maxStoredEvents` SSE events. Size it on the expected concurrent clients (an idle client keeps its session for `sessionTimeout`) and on the available memory, e.g. `maxSessions: 1000` for ~1000 users on a gateway with enough memory, or `null` for no limit when the route is authenticated and the clients are trusted.
 
-Requests with an unknown session ID (closed, expired or of a restarted gateway) get `404 Session not found`, as the MCP specification requires: the clients then start a new session.
+Requests with an unknown session ID (closed, expired or of a restarted gateway) get `404 Session not found`, as the MCP specification requires: the clients then start a new session. Requests without a session ID that are not an initialization get `400`.
+
+Request bodies are limited to 4 MB.
 
 With several gateway instances behind a load balancer, either use sticky sessions or set `stateless: true`: every POST request gets a new MCP server, no session ID is issued and `GET`/`DELETE` answer `405`. In this mode server-to-client notifications (e.g. `tools/list_changed`) and stream resumability are not available. The tools of the actions are converted once and cached until the services change (`$services.changed`), so a new server per request costs little.
 
 ## Custom tools
 
-Tools that don't map 1:1 to an action can be declared with the `tools` option. `input` and `output` are Zod raw shapes; `handler` is either an action name (called with the tool params) or a function `(params, broker, meta, callOptions)`.
+Tools that don't map 1:1 to an action can be declared with the `tools` option. `input` and `output` are Zod raw shapes (Zod 3, `zod@^3.25`, the version used by the mixin); `handler` is either an action name (called with the tool params) or a function `(params, broker, meta, callOptions)`.
 
 ```javascript
 import { z } from "zod";
@@ -289,7 +298,13 @@ McpServerMixin({
 })
 ```
 
-When `output` is set, the result is also returned as `structuredContent` (required by the MCP spec) and must match the schema. Errors thrown by the handler are returned as tool errors (`isError: true`).
+When `output` is set, the result is also returned as `structuredContent` (required by the MCP spec) and must match the schema.
+
+## Tool results and errors
+
+The result of an action or of a custom tool handler is returned to the LLM as JSON text. With `maxResultLength`, longer results are truncated with a note that asks the LLM for more specific parameters (e.g. filters or pagination).
+
+Errors (of the actions and of the custom tool handlers) are returned as tool errors (`isError: true`), so the LLM can see what went wrong: the text contains the error `name`, `message`, `code`, `type` and `data`, never the stack trace.
 
 ## Action Description & MCP Metadata
 
@@ -335,6 +350,7 @@ actions: {
 ```
 
 You can also use shorthand:
+
 - `mcp: true` — register with default settings (same as omitting the field)
 - `mcp: false` — exclude this action from MCP tools
 
@@ -343,14 +359,14 @@ You can also use shorthand:
 MCP tool annotations help AI assistants understand the behavior of each tool. The mixin auto-detects annotations based on the action's REST method or, for actions without `rest`, on the verb at the start of the action name:
 
 | REST Method | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | `GET` | `true` | `false` | `true` | `false` |
 | `PUT` | `false` | `false` | `true` | `false` |
 | `DELETE` | `false` | `true` | `true` | `false` |
 | `POST` (or no REST) | `false` | `false` | `false` | `false` |
 
 | Action name (without `rest`) | Detected as |
-|---|---|
+| --- | --- |
 | `get*`, `find*`, `list*`, `count*`, `search*`, `query*`, `fetch*`, `read*`, `resolve*`, `show*`, `describe*`, `exists*`, `has*`, `is*` | `GET` |
 | `remove*`, `delete*`, `destroy*`, `purge*`, `drop*`, `clear*` | `DELETE` |
 | `replace*`, `set*`, `put*`, `upsert*` | `PUT` |
@@ -380,7 +396,7 @@ actions: {
 The mixin automatically converts fastest-validator parameter schemas to Zod schemas for MCP tool input validation. The following mappings are supported:
 
 | fastest-validator | Zod equivalent |
-|---|---|
+| --- | --- |
 | `"string"` | `z.string()` |
 | `"number"` | `z.number()` |
 | `"boolean"` | `z.boolean()` |
@@ -397,7 +413,7 @@ The mixin automatically converts fastest-validator parameter schemas to Zod sche
 | `{ type: "object", props: { name: "string" } }` | `z.object({ name: z.string() }).passthrough()` (unknown properties are kept, as in fastest-validator) |
 | `{ type: "object", strict: true, props: { ... } }` | `z.object({ ... }).strict()` (`strict: "remove"` strips the unknown properties) |
 | `{ type: "object" }` | `z.object({}).passthrough()` (any object) |
-| `{ $$type: "object|optional", city: "string" }` | `z.object({ city: z.string() }).passthrough().optional()` |
+| `{ $$type: "object\|optional", city: "string" }` | `z.object({ city: z.string() }).passthrough().optional()` |
 | `{ type: "enum", values: ["a", "b"] }` | `z.enum(["a", "b"])` |
 | `{ type: "string", optional: true }` | `z.string().optional()` |
 | `{ type: "number", default: 5 }` | `z.number().default(5)` |
@@ -427,10 +443,10 @@ The Zod schema describes the tool to the LLM (as JSON Schema) and the MCP SDK va
 When `exposeBrokerTools` is `true` (default), the following broker-level tools are registered:
 
 | Tool | Description |
-|---|---|
+| --- | --- |
 | `moleculer_list_nodes` | List all Moleculer nodes in the cluster (with `withServices`, a summary of their services: name, version, metadata, action and event names) |
-| `moleculer_list_services` | List all registered services |
-| `moleculer_list_actions` | List all available actions |
+| `moleculer_list_services` | List all registered services (without their `settings`) |
+| `moleculer_list_actions` | List the actions callable through MCP (same filters as auto-discovery) |
 | `moleculer_list_events` | List all event listeners |
 
 The service `settings` and the node `config` are never returned: settings often contain credentials (e.g. a database URI) that are not listed in `$secureSettings`.
@@ -438,9 +454,9 @@ The service `settings` and the node `config` are never returned: settings often 
 These tools are registered regardless of `exposeBrokerTools`, unless `exposeGenericTools` is `false`:
 
 | Tool | Description |
-|---|---|
+| --- | --- |
 | `moleculer_call_action` | Call an exposed Moleculer action by name (generic fallback, same filters as auto-discovery) |
-| `moleculer_emit_event` | Emit or broadcast a Moleculer event |
+| `moleculer_emit_event` | Emit or broadcast a Moleculer event (not the internal `$` ones, unless allowed by `allowedEvents`) |
 
 ## MCP Client Setup
 
@@ -478,10 +494,23 @@ Add to your Claude Desktop configuration (`claude_desktop_config.json`):
 }
 ```
 
+## Development
+
+```bash
+npm run dev        # example server (examples/simple) on http://localhost:3300/mcp
+npm run inspect    # MCP Inspector: connect it to http://localhost:3300/mcp (Streamable HTTP)
+npm test           # tests with coverage
+npm run check      # type check (src, test, examples)
+npm run lint       # eslint
+npm run build      # CommonJS and ESM builds in dist/
+```
+
 ## License
+
 The project is available under the [MIT license](https://tldrlegal.com/license/mit-license).
 
 ## Contact
+
 Copyright (c) 2026 MoleculerJS
 
 [![@MoleculerJS](https://img.shields.io/badge/github-moleculerjs-green.svg)](https://github.com/moleculerjs) [![@MoleculerJS](https://img.shields.io/badge/twitter-MoleculerJS-blue.svg)](https://twitter.com/MoleculerJS)
