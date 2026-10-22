@@ -74,6 +74,27 @@ interface McpSession {
 	lastActivity: number;
 	/** Requests in progress, incl. open SSE (GET) streams: a busy session is never idle */
 	openStreams: number;
+	/** Owner of the session (see `sessionOwner`), `undefined` for an anonymous session */
+	owner?: string;
+}
+
+/**
+ * The default `sessionOwner`: an identifier of `ctx.meta.user` (the user set by the route
+ * `authenticate` method), or the whole user as JSON if it has none.
+ */
+function defaultSessionOwner(ctx: Moleculer.Context): string | undefined {
+	const user = (ctx.meta as Record<string, unknown> | undefined)?.user;
+	if (user == null) return undefined;
+	if (typeof user !== "object") return String(user);
+	const { id, _id, username, email } = user as Record<string, unknown>;
+	const key = id ?? _id ?? username ?? email;
+	if (key != null) return String(key);
+	try {
+		return JSON.stringify(user);
+	} catch {
+		// e.g. a circular user: set `sessionOwner` to bind the sessions to it
+		return undefined;
+	}
 }
 
 /** A moleculer-web request, with the `auth` read by the MCP SDK transport */
@@ -624,7 +645,7 @@ export function McpServerMixin(
 					);
 					return false;
 				}
-				if (!this.transports.has(sessionId)) {
+				if (!this.transports.has(sessionId) || !this.isMcpSessionOwner(req, sessionId)) {
 					await this.sendMcpError(
 						req,
 						res,
@@ -634,6 +655,25 @@ export function McpServerMixin(
 					return false;
 				}
 				return true;
+			},
+
+			/** Owner of the sessions opened by the request (see `sessionOwner`) */
+			getMcpSessionOwner(req: McpRequest): string | undefined {
+				const sessionOwner = (this.mcpOptions as McpServerMixinOptions).sessionOwner;
+				if (sessionOwner === false || !req.$ctx) return undefined;
+				return (sessionOwner ?? defaultSessionOwner)(req.$ctx) ?? undefined;
+			},
+
+			/**
+			 * Check that the request comes from the owner of the session. Another user gets the
+			 * same answer as for an unknown session, so the session existence is not revealed.
+			 */
+			isMcpSessionOwner(req: McpRequest, sessionId: string): boolean {
+				if ((this.mcpOptions as McpServerMixinOptions).sessionOwner === false) return true;
+				const session: McpSession | undefined = this.mcpSessions.get(sessionId);
+				if (session?.owner === this.getMcpSessionOwner(req)) return true;
+				this.logger.warn(`Rejected MCP request of another user for session ${sessionId}`);
+				return false;
 			},
 
 			/** Send a JSON-RPC error response, unless the response has already been started */
@@ -691,6 +731,15 @@ export function McpServerMixin(
 					const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
 					if (sessionId && this.transports.has(sessionId)) {
+						if (!this.isMcpSessionOwner(req, sessionId)) {
+							await this.sendMcpError(
+								req,
+								res,
+								404,
+								jsonRpcError(-32001, "Session not found")
+							);
+							return;
+						}
 						// Existing session: its transport is already connected to its server
 						const transport: StreamableHTTPServerTransport =
 							this.transports.get(sessionId);
@@ -768,6 +817,7 @@ export function McpServerMixin(
 								}
 							});
 						session.transport = transport;
+						session.owner = this.getMcpSessionOwner(req);
 
 						// Remove the session when its transport is closed (DELETE, idle, shutdown)
 						session.server.server.onclose = () => {

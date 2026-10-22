@@ -29,6 +29,7 @@ test/
   annotations.test.ts   # Annotations from REST method and action names
   request-context.test.ts # requestID, parent span and caller of the tool calls
   options.test.ts       # Mixin options, routeOptions merge, protocol errors
+  session-owner.test.ts # Sessions bound to their user (sessionOwner)
   mcp-client.ts         # Test MCP client helper
   setup.ts              # Vitest setup: random ports never get a port refused by `fetch` ("bad port")
 examples/
@@ -74,6 +75,7 @@ npm run inspect   # MCP Inspector UI: connect it to http://localhost:3300/mcp (S
 - `forwardMeta` — `string[]` (default: `["user"]`) — HTTP request `ctx.meta` fields forwarded to actions/events
 - `sessionTimeout` — `number | false` (default: 30 min) — close idle sessions (`false`/`0` disable)
 - `maxSessions` — `number | null` (default: `100`) — max open sessions, `503` over the limit, `null` unlimited
+- `sessionOwner` — `false | (ctx) => string` (default: id of `ctx.meta.user`) — requests of another owner get `404`
 - `maxStoredEvents` — `number` (default: `1000`) — SSE events kept per session
 - `stateless` — `boolean` (default: `false`) — no sessions, a new MCP server per request
 - `allowedOrigins` / `allowedHosts` — `string[]` — DNS rebinding protection

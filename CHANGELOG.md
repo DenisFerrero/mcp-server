@@ -20,6 +20,7 @@ All notable changes to this project will be documented in this file.
 - **Sessions are closed after 30 minutes of inactivity** (no requests, no open SSE stream). See `sessionTimeout`.
 - **Tool params are logged at `debug` level** (they were logged at `info`).
 - **The actions of the moleculer-web gateways are never exposed** — The gateway's own ones and the ones of every other moleculer-web gateway of the cluster, recognized by their service metadata (e.g. `api.listAliases`, which lists all the routes).
+- **Sessions are bound to their user** — The requests of a session with a different `ctx.meta.user` (compared by `id`, `_id`, `username` or `email`) get `404`, as for an unknown session. See `sessionOwner`.
 - **At most 100 open sessions by default** — New sessions over the limit get `503`. See `maxSessions`.
 - **`moleculer_list_actions` lists only the actions callable through MCP.**
 - **Actions without `rest` get annotations from their name** (e.g. `find` is read-only, `remove` destructive) instead of the POST ones.
@@ -34,6 +35,7 @@ All notable changes to this project will be documented in this file.
 - **`exposeGenericTools` option** — Hides `moleculer_call_action` and `moleculer_emit_event`.
 - **Idle sessions cleanup** — New `sessionTimeout` option (default 30 minutes, `false` to disable).
 - **`maxSessions` option** — Max open sessions per gateway instance (default `100`, `null` for no limit), counting the sessions being initialized: slow clients can't exceed it with concurrent requests.
+- **`sessionOwner` option** — Owner of a session from the HTTP request context (default: an identifier of `ctx.meta.user`), so a leaked session ID can't be used by another user to read its SSE stream and stored events. `false` to disable.
 - **Request ID and tracing** — The actions and events called by the tools get the `requestID` of the HTTP request, its context as parent span and the gateway as `caller`, without inheriting its `ctx.meta`. Function handlers of custom tools get the ready `callOptions` as fourth argument.
 - **Bounded event store** — New `maxStoredEvents` option (default `1000`) for the SSE resumability store.
 - **DNS rebinding protection** — New `allowedOrigins` (also used for the route CORS) and `allowedHosts` options.

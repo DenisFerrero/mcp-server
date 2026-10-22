@@ -1,5 +1,5 @@
 import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
-import type { CallingOptions, ServiceBroker } from "moleculer";
+import type { CallingOptions, Context, ServiceBroker } from "moleculer";
 import type { ApiRouteSchema } from "moleculer-web";
 import type { ZodRawShape } from "zod";
 
@@ -122,6 +122,17 @@ export interface McpServerMixinOptions {
 	 * Default: 100
 	 */
 	maxSessions?: number | null;
+
+	/**
+	 * Owner of a session, computed from the context of the HTTP request: the requests of a
+	 * session with a different owner are rejected with `404`, as for an unknown session, so a
+	 * leaked session ID can't be used by another user (e.g. to read the SSE stream and its stored
+	 * events). By default the owner is the `id`, `_id`, `username` or `email` of `ctx.meta.user`
+	 * (the whole user, as JSON, if it has none of them); without a user the sessions are
+	 * anonymous and usable only without a user. `false` to disable the check.
+	 * Not used in stateless mode.
+	 */
+	sessionOwner?: false | ((ctx: Context) => string | null | undefined);
 
 	/** Max number of SSE events kept in memory per session for resumability. Default: 1000 */
 	maxStoredEvents?: number;
