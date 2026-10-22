@@ -45,7 +45,8 @@ npm run check     # tsc --noEmit (type check only)
 npm test          # vitest --run --coverage
 npm run ci        # vitest --watch (development)
 npm run lint      # eslint
-npm run dev       # nodemon with MCP inspector
+npm run dev       # example server (examples/simple, port 3300) with nodemon
+npm run inspect   # MCP Inspector UI: connect it to http://localhost:3300/mcp (Streamable HTTP)
 ```
 
 ## Naming Conventions
