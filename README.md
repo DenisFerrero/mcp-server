@@ -156,6 +156,10 @@ McpServerMixin({
   // Default: 100
   maxSessions: 100,
 
+  // Owner of a session: requests of another user get 404, false to disable (see "Sessions")
+  // Default: the id, _id, username or email of ctx.meta.user
+  sessionOwner: ctx => ctx.meta.user?.id,
+
   // SSE events kept in memory per session for resumability
   // Default: 1000
   maxStoredEvents: 1000,
@@ -195,6 +199,7 @@ McpServerMixin({
 | `forwardMeta` | `string[]` | `["user"]` | `ctx.meta` fields of the HTTP request forwarded to the called actions and events |
 | `sessionTimeout` | `number \| false` | `1800000` (30 min) | Close sessions with no requests and no open SSE stream for this time. `false` or `0` to disable |
 | `maxSessions` | `number \| null` | `100` | Max open sessions of this gateway instance; new sessions get `503` over the limit. `null` for no limit |
+| `sessionOwner` | `false \| (ctx) => string` | id of `ctx.meta.user` | Owner of a session, from the HTTP request context: the requests of another owner get `404`. `false` to disable |
 | `maxStoredEvents` | `number` | `1000` | SSE events kept in memory per session to resume interrupted streams |
 | `stateless` | `boolean` | `false` | No sessions: a new MCP server per request (multi-instance gateways) |
 | `allowedOrigins` | `string[]` | any | Allowed `Origin` headers (also used for the route CORS) |
@@ -258,6 +263,8 @@ McpServerMixin({
 Each MCP session lives in the memory of the gateway process. Sessions are closed on `DELETE` requests or after `sessionTimeout` without activity, and keep at most `maxStoredEvents` SSE events to resume interrupted streams.
 
 `maxSessions` (default `100`) bounds the open sessions, so clients that open sessions without closing them (or an attacker doing it on purpose) can't exhaust the memory: over the limit, new sessions are rejected with `503` until a session is closed, while the open ones keep working. Each session has its own MCP server with all the tools: about 0.5 MB with 25 tools (measured), more with more tools, plus up to `maxStoredEvents` SSE events. Size it on the expected concurrent clients (an idle client keeps its session for `sessionTimeout`) and on the available memory, e.g. `maxSessions: 1000` for ~1000 users on a gateway with enough memory, or `null` for no limit when the route is authenticated and the clients are trusted.
+
+Each session is bound to the user that opened it: by default the `id`, `_id`, `username` or `email` of `ctx.meta.user` (the whole user as JSON if it has none of them). The requests of another user get `404 Session not found`, as for an unknown session, so a leaked session ID can't be used to read the SSE stream and the stored events of its owner. Sessions opened without a user are usable only without a user. Set `sessionOwner` to compare something else (e.g. `ctx => ctx.meta.user.tenantId`), or `false` to disable the check.
 
 Requests with an unknown session ID (closed, expired or of a restarted gateway) get `404 Session not found`, as the MCP specification requires: the clients then start a new session. Requests without a session ID that are not an initialization get `400`.
 
@@ -468,18 +475,42 @@ claude mcp add --transport http moleculer http://127.0.0.1:3000/mcp
 
 ### Claude Desktop
 
-Add to your Claude Desktop configuration (`claude_desktop_config.json`):
+`claude_desktop_config.json` starts local (stdio) servers only: connect a server running on your machine through the [`mcp-remote`](https://github.com/geelen/mcp-remote) bridge, which needs Node.js 18 or newer. Open the file from Settings → Developer → Edit Config, then restart Claude Desktop:
 
 ```json
 {
   "mcpServers": {
     "moleculer": {
-      "url": "http://localhost:3000/mcp",
-      "type": "http"
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:3000/mcp"]
     }
   }
 }
 ```
+
+With `authentication` enabled on the route, pass the token as a header. Keep the value in `env` and don't put a space after `Authorization:`: Claude Desktop on Windows doesn't escape the spaces inside `args`.
+
+```json
+{
+  "mcpServers": {
+    "moleculer": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "http://localhost:3000/mcp",
+        "--header",
+        "Authorization:${AUTH_HEADER}"
+      ],
+      "env": {
+        "AUTH_HEADER": "Bearer <token>"
+      }
+    }
+  }
+}
+```
+
+`mcp-remote` accepts plain HTTP only for `localhost` and `127.0.0.1`: for a server on another machine of a trusted private network add the `--allow-http` flag.
 
 ### Generic MCP Client
 
