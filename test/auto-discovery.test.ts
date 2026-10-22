@@ -371,6 +371,12 @@ describe("Auto-discovery Integration Tests", () => {
 						handler() {
 							return "hidden";
 						}
+					},
+					disabled: {
+						mcp: { enabled: false, name: "disabled_tool" },
+						handler() {
+							return "hidden";
+						}
 					}
 				}
 			});
@@ -382,6 +388,15 @@ describe("Auto-discovery Integration Tests", () => {
 				const toolNames = tools.map((t: Tool) => t.name);
 				expect(toolNames).toContain("weather_forecast");
 				expect(toolNames).not.toContain("weather_internal");
+				// `mcp: { enabled: false }` excludes the action as `mcp: false` does
+				expect(toolNames).not.toContain("disabled_tool");
+				expect(toolNames).not.toContain("weather_disabled");
+
+				const call = await callTool(mcpClient, "moleculer_call_action", {
+					action: "weather.disabled"
+				});
+				expect(call.isError).toBe(true);
+				expect(call.content[0].text).toContain("is not exposed via MCP");
 			} finally {
 				await closeMcpClient(mcpClient);
 			}

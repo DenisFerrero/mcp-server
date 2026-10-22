@@ -376,3 +376,103 @@ describe("fastest-validator compatibility", () => {
 		expect(() => result.code.parse("abd")).toThrow();
 	});
 });
+
+describe("less common rules", () => {
+	it("ignores the $$ options of the params schema", () => {
+		const result = convertFastestValidatorToZod({
+			$$strict: true,
+			$$async: true,
+			name: "string"
+		});
+		expect(Object.keys(result)).toEqual(["name"]);
+	});
+
+	it("email and url flags in the pipe syntax and as string options", () => {
+		const result = convertFastestValidatorToZod({
+			a: "string|email",
+			b: "string|url",
+			c: { type: "string", email: true },
+			d: { type: "string", url: true }
+		});
+		for (const key of ["a", "c"]) {
+			expect(result[key].parse("john@example.com")).toBe("john@example.com");
+			expect(() => result[key].parse("john")).toThrow();
+		}
+		for (const key of ["b", "d"]) {
+			expect(result[key].parse("https://example.com")).toBe("https://example.com");
+			expect(() => result[key].parse("example")).toThrow();
+		}
+	});
+
+	it("email and url pipe flags on another type set the type", () => {
+		const result = convertFastestValidatorToZod({ a: "any|email", b: "any|url" });
+		expect(() => result.a.parse("john")).toThrow();
+		expect(() => result.b.parse("example")).toThrow();
+	});
+
+	it("mixed enums become unions of literals", () => {
+		const result = convertFastestValidatorToZod({
+			level: { type: "enum", values: [1, 2, "max"] },
+			flag: { type: "string", enum: ["on", true] }
+		});
+		expect(result.level.parse(2)).toBe(2);
+		expect(result.level.parse("max")).toBe("max");
+		expect(() => result.level.parse(3)).toThrow();
+		expect(result.flag.parse(true)).toBe(true);
+		expect(() => result.flag.parse("off")).toThrow();
+	});
+
+	it("enum without values accepts anything", () => {
+		const result = convertFastestValidatorToZod({ a: { type: "enum", values: [] } });
+		expect(result.a.parse("x")).toBe("x");
+	});
+
+	it("array with empty: false and negative numbers", () => {
+		const result = convertFastestValidatorToZod({
+			tags: { type: "array", items: "string", empty: false },
+			delta: "number|negative"
+		});
+		expect(() => result.tags.parse([])).toThrow();
+		expect(result.tags.parse(["a"])).toEqual(["a"]);
+		expect(result.delta.parse(-1)).toBe(-1);
+		expect(() => result.delta.parse(1)).toThrow();
+	});
+
+	it("boolean and numeric pipe values", () => {
+		const result = convertFastestValidatorToZod({
+			text: "string|empty:false|max:3",
+			code: "string|empty:true"
+		});
+		expect(() => result.text.parse("")).toThrow();
+		expect(() => result.text.parse("abcd")).toThrow();
+		expect(result.code.parse("")).toBe("");
+	});
+
+	it("multi without rules and invalid field definitions accept anything", () => {
+		const result = convertFastestValidatorToZod({
+			a: { type: "multi", rules: [] },
+			b: { type: "multi", rules: ["string"] },
+			c: 42 as unknown as string
+		});
+		expect(result.a.parse(1)).toBe(1);
+		expect(result.b.parse("x")).toBe("x");
+		expect(() => result.b.parse(1)).toThrow();
+		expect(result.c.parse({ x: 1 })).toEqual({ x: 1 });
+	});
+
+	it("array length and equal with a non-primitive value", () => {
+		const result = convertFastestValidatorToZod({
+			pair: { type: "array", items: "number", length: 2 },
+			same: { type: "equal", value: { a: 1 } }
+		});
+		expect(result.pair.parse([1, 2])).toEqual([1, 2]);
+		expect(() => result.pair.parse([1])).toThrow();
+		// Object equality can't be expressed in JSON Schema: left to the action's validator
+		expect(result.same.parse({ b: 2 })).toEqual({ b: 2 });
+	});
+
+	it("non-object action params produce no input schema", () => {
+		expect(convertActionParamsToZod(42)).toEqual({});
+		expect(convertActionParamsToZod(true)).toEqual({});
+	});
+});

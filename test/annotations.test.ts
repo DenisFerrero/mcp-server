@@ -61,6 +61,30 @@ describe("detectActionAnnotations", () => {
 		expect(detectActionAnnotations("users.settle", {})).toEqual(DEFAULT);
 	});
 
+	it("should read the method of object and array rest definitions", () => {
+		expect(detectActionAnnotations("a.b", { rest: { method: "GET", path: "/" } })).toEqual(
+			READ_ONLY
+		);
+		expect(
+			detectActionAnnotations("a.b", {
+				rest: [
+					{ method: "DELETE", path: "/" },
+					{ method: "GET", path: "/x" }
+				]
+			})
+		).toEqual(DESTRUCTIVE);
+		expect(detectActionAnnotations("a.b", { rest: ["PUT /x", "GET /y"] })).toEqual(IDEMPOTENT);
+	});
+
+	it("should fall back to the name when rest has no method", () => {
+		// Only a path (all methods) or an empty definition
+		expect(detectActionAnnotations("products.find", { rest: "/search" })).toEqual(READ_ONLY);
+		expect(detectActionAnnotations("products.find", { rest: { path: "/" } })).toEqual(
+			READ_ONLY
+		);
+		expect(detectActionAnnotations("products.remove", { rest: [] })).toEqual(DESTRUCTIVE);
+	});
+
 	it("should prefer the REST method over the name", () => {
 		expect(detectActionAnnotations("products.find", { rest: "POST /search" })).toEqual(DEFAULT);
 		expect(detectActionAnnotations("products.create", { rest: "GET /new" })).toEqual(READ_ONLY);

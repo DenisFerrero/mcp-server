@@ -142,6 +142,17 @@ describe("Options and route", () => {
 	});
 
 	describe("routeOptions", () => {
+		it("should disable CORS with cors: false", async () => {
+			await start({ routeOptions: { cors: false } });
+			const res = await request("OPTIONS", {
+				Origin: "https://app.example.com",
+				"Access-Control-Request-Method": "POST"
+			});
+			expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+			// Non-browser clients are not affected
+			expect((await request("POST", {}, INITIALIZE)).status).toBe(200);
+		});
+
 		it("should use a custom path", async () => {
 			await start({ routeOptions: { path: "/ai/mcp" } });
 			const mcpClient = await connect("/ai/mcp");

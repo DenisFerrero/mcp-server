@@ -29,6 +29,7 @@ test/
   annotations.test.ts   # Annotations from REST method and action names
   options.test.ts       # Mixin options, routeOptions merge, protocol errors
   mcp-client.ts         # Test MCP client helper
+  setup.ts              # Vitest setup: random ports never get a port refused by `fetch` ("bad port")
 examples/
   index.ts              # Entry point (module selector)
   simple/
