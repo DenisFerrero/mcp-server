@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { convertFastestValidatorToZod, convertActionParamsToZod } from "../src/schema-converter";
+import { convertFastestValidatorToZod, convertActionParamsToZod } from "../src/schema-converter.js";
 
 describe("convertFastestValidatorToZod", () => {
 	describe("basic types", () => {
@@ -328,5 +328,51 @@ describe("fork additions", () => {
 		expect(result.tags.parse(["a"])).toEqual(["a"]);
 		expect(() => result.code.parse("ab")).toThrow();
 		expect(() => result.text.parse("")).toThrow();
+	});
+});
+
+describe("fastest-validator compatibility", () => {
+	it("object without props keeps all the properties", () => {
+		const result = convertFastestValidatorToZod({ filter: { type: "object" } });
+		expect(result.filter.parse({ a: 1, b: { c: "x" } })).toEqual({ a: 1, b: { c: "x" } });
+	});
+
+	it("object with props keeps unknown properties, unless strict", () => {
+		const result = convertFastestValidatorToZod({
+			loose: { type: "object", props: { a: "number" } },
+			remove: { type: "object", strict: "remove", props: { a: "number" } },
+			strict: { type: "object", strict: true, props: { a: "number" } }
+		});
+		expect(result.loose.parse({ a: 1, b: 2 })).toEqual({ a: 1, b: 2 });
+		expect(result.remove.parse({ a: 1, b: 2 })).toEqual({ a: 1 });
+		expect(() => result.strict.parse({ a: 1, b: 2 })).toThrow();
+	});
+
+	it("nested object shorthand with $$type", () => {
+		const result = convertFastestValidatorToZod({
+			address: { $$type: "object|optional", city: "string", zip: "number" }
+		});
+		expect(result.address.parse(undefined)).toBeUndefined();
+		expect(result.address.parse({ city: "Rome", zip: 100 })).toEqual({
+			city: "Rome",
+			zip: 100
+		});
+		expect(() => result.address.parse({ city: "Rome" })).toThrow();
+	});
+
+	it("dynamic default makes the field optional, without a static default", () => {
+		const result = convertFastestValidatorToZod({
+			createdAt: { type: "number", default: () => Date.now() }
+		});
+		expect(result.createdAt.parse(undefined)).toBeUndefined();
+		expect(result.createdAt.parse(5)).toBe(5);
+	});
+
+	it("pattern with patternFlags", () => {
+		const result = convertFastestValidatorToZod({
+			code: { type: "string", pattern: "^abc$", patternFlags: "i" }
+		});
+		expect(result.code.parse("ABC")).toBe("ABC");
+		expect(() => result.code.parse("abd")).toThrow();
 	});
 });

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { convertFastestValidatorToZod } from "../src/schema-converter";
+import { convertFastestValidatorToZod } from "../src/schema-converter.js";
 
 // Convert a single field and return its Zod schema
 function field(def: unknown) {

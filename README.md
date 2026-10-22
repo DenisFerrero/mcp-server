@@ -173,7 +173,7 @@ McpServerMixin({
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `routeOptions` | `ApiRouteSchema` | `{ path: "/mcp" }` | moleculer-web route configuration |
+| `routeOptions` | `Partial<ApiRouteSchema>` | `{ path: "/mcp" }` | moleculer-web route configuration. The MCP aliases, the CORS methods/headers needed by MCP and `bodyParsers.json: false` are always added |
 | `services` | `string \| string[]` | `undefined` | Whitelist of service names or glob pattern |
 | `excludeActions` | `string[]` | `undefined` | Action name patterns to exclude |
 | `exposeBrokerTools` | `boolean` | `true` | Whether to register built-in broker tools |
@@ -219,7 +219,7 @@ Custom tools with a function handler receive the forwarded meta as third argumen
 
 - Auto-discovered tools are generated only for actions that pass all the filters: not internal (`$`), `published` visibility, not `mcp: false`, not an action of the gateway itself, matching `services` and not matching `excludeActions`.
 - `moleculer_call_action` and `moleculer_list_actions` apply the same filters: a filtered action returns a `not exposed via MCP` error and is not listed.
-- `moleculer_emit_event` can emit any event, unless `allowedEvents` is set. Set `exposeGenericTools: false` if the LLM must not emit events or call actions by name.
+- `moleculer_emit_event` can emit any event except the internal ones (`$services.changed`, `$node.*`, ...), unless `allowedEvents` is set: then only the matching events, internal ones included. Set `exposeGenericTools: false` if the LLM must not emit events or call actions by name.
 - `moleculer_list_nodes`/`_services`/`_events` describe the whole cluster: set `exposeBrokerTools: false` if that must stay private.
 - Use `callOptions` (e.g. `{ timeout: 10000 }`) to bound the calls: Moleculer calls can't be aborted when the client cancels a request.
 
@@ -373,15 +373,19 @@ The mixin automatically converts fastest-validator parameter schemas to Zod sche
 | `"url"` | `z.string().url()` |
 | `"any"` | `z.any()` |
 | `{ type: "string", min: 3, max: 100 }` | `z.string().min(3).max(100)` |
-| `{ type: "string", pattern: "^[a-z]+$" }` | `z.string().regex(...)` |
+| `{ type: "string", pattern: "^[a-z]+$" }` | `z.string().regex(...)` (`patternFlags` supported) |
 | `{ type: "string", enum: ["a", "b"] }` | `z.enum(["a", "b"])` |
 | `{ type: "number", positive: true, integer: true }` | `z.number().positive().int()` |
 | `{ type: "number", min: 0, max: 100 }` | `z.number().min(0).max(100)` |
 | `{ type: "array", items: "string" }` | `z.array(z.string())` |
-| `{ type: "object", props: { name: "string" } }` | `z.object({ name: z.string() })` |
+| `{ type: "object", props: { name: "string" } }` | `z.object({ name: z.string() }).passthrough()` (unknown properties are kept, as in fastest-validator) |
+| `{ type: "object", strict: true, props: { ... } }` | `z.object({ ... }).strict()` (`strict: "remove"` strips the unknown properties) |
+| `{ type: "object" }` | `z.object({}).passthrough()` (any object) |
+| `{ $$type: "object|optional", city: "string" }` | `z.object({ city: z.string() }).passthrough().optional()` |
 | `{ type: "enum", values: ["a", "b"] }` | `z.enum(["a", "b"])` |
 | `{ type: "string", optional: true }` | `z.string().optional()` |
 | `{ type: "number", default: 5 }` | `z.number().default(5)` |
+| `{ type: "number", default: () => Date.now() }` | `z.number().optional()` (the action applies the dynamic default) |
 | `"number\|integer\|positive"` (pipe syntax) | `z.number().int().positive()` |
 | `"string\|min:3\|max:10"` (pipe syntax with options) | `z.string().min(3).max(10)` |
 | `"uuid"` | `z.string().uuid()` |
@@ -400,7 +404,7 @@ The mixin automatically converts fastest-validator parameter schemas to Zod sche
 | `{ type: "equal", value: "yes" }` | `z.literal("yes")` (`field` comparisons are not converted) |
 | Unknown/custom type | `z.any()` |
 
-The Zod schema is used to describe the tool to the LLM (as JSON Schema): the real validation is still done by the action's validator when it is called. Rules that can't be expressed in JSON Schema (e.g. `trim`, `convert`, custom `check` functions) are therefore not converted.
+The Zod schema describes the tool to the LLM (as JSON Schema) and the MCP SDK validates the tool arguments with it before calling the action, whose validator then runs as usual. Rules that can't be expressed in JSON Schema (e.g. `trim`, `convert`, custom `check` functions) are not converted: they are left to the action's validator.
 
 ## Built-in Tools
 

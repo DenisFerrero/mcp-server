@@ -91,12 +91,20 @@ export function toErrorResult(err: unknown): CallToolResult {
 		errorInfo = { name: "UnknownError", message: String(err) };
 	}
 
+	let details: string;
+	try {
+		details = JSON.stringify(errorInfo, null, 2);
+	} catch {
+		// e.g. a circular `data`
+		details = JSON.stringify({ ...errorInfo, data: undefined }, null, 2);
+	}
+
 	return {
 		isError: true,
 		content: [
 			{
 				type: "text",
-				text: `Error ${errorInfo.name}: ${errorInfo.message}\n${JSON.stringify(errorInfo, null, 2)}`
+				text: `Error ${errorInfo.name}: ${errorInfo.message}\n${details}`
 			}
 		]
 	};

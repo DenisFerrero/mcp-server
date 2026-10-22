@@ -27,6 +27,7 @@ test/
   call-options.test.ts  # callOptions and maxResultLength
   stateless.test.ts     # Stateless mode
   annotations.test.ts   # Annotations from REST method and action names
+  options.test.ts       # Mixin options, routeOptions merge, protocol errors
   mcp-client.ts         # Test MCP client helper
 examples/
   index.ts              # Entry point (module selector)
@@ -41,7 +42,8 @@ examples/
 
 ```bash
 npm run build     # tsc — dual CJS/ESM output to dist/
-npm run check     # tsc --noEmit (type check only)
+npm run check     # tsc, strict, whole project (src, test, examples)
+npm run check:src # type check of src only (used by CI with Moleculer 0.14)
 npm test          # vitest --run --coverage
 npm run ci        # vitest --watch (development)
 npm run lint      # eslint
@@ -81,6 +83,8 @@ npm run inspect   # MCP Inspector UI: connect it to http://localhost:3300/mcp (S
 - `McpServerMixin` must come after `ApiGateway` in `mixins`.
 - The tests close clients with a DELETE (`closeMcpClient`); pass `{ terminate: false }` to simulate a client gone away.
 - `scripts/sync-version.mjs` runs on `npm version` and updates `src/version.ts`.
+- `tsconfig.json` (strict, noEmit) covers the whole project; `tsconfig.build.json` (src only) is extended by `tsconfig.cjs.json`/`tsconfig.esm.json`, which emit JS and `.d.ts` side by side.
+- The SDK validates tool arguments with the converted Zod schemas: a converter mismatch rejects or alters real requests.
 
 ## Tech Stack
 

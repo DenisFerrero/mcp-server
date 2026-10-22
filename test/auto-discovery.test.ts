@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { ServiceBroker } from "moleculer";
+import { Context, ServiceBroker } from "moleculer";
 import ApiGateway from "moleculer-web";
 import { McpServerMixin } from "../src/index.js";
 import "../src/moleculer-types.js";
@@ -189,8 +189,9 @@ describe("Auto-discovery Integration Tests", () => {
 				expect(tool!.inputSchema).toBeDefined();
 				expect(tool!.inputSchema.properties).toHaveProperty("city");
 				expect(tool!.inputSchema.properties).toHaveProperty("days");
-				expect(tool!.inputSchema.properties!.city.type).toBe("string");
-				expect(tool!.inputSchema.properties!.days.type).toBe("number");
+				const properties = tool!.inputSchema.properties as Record<string, { type: string }>;
+				expect(properties.city.type).toBe("string");
+				expect(properties.days.type).toBe("number");
 			} finally {
 				await closeMcpClient(mcpClient);
 			}
@@ -745,7 +746,7 @@ describe("Auto-discovery Integration Tests", () => {
 			const mcpClient = await startWith({
 				echo: {
 					params: { $$root: true, type: "array", items: "string" },
-					handler: ctx => ctx.params
+					handler: (ctx: Context) => ctx.params
 				}
 			});
 			try {

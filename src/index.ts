@@ -4,14 +4,19 @@
  * MIT Licensed
  */
 
-"use strict";
-
 import { VERSION } from "./version.js";
 
 import { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import Moleculer, { ActionSchema, ServiceBroker, ServiceSchema } from "moleculer";
-import type { ApiSettingsSchema } from "moleculer-web";
+import type {
+	ApiRouteSchema,
+	ApiSettingsSchema,
+	CorsOptions,
+	GatewayResponse,
+	IncomingRequest
+} from "moleculer-web";
 import _ from "lodash";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -59,27 +64,84 @@ interface McpSession {
 	openStreams: number;
 }
 
+/** A moleculer-web request, with the `auth` read by the MCP SDK transport */
+type McpRequest = IncomingRequest & { auth?: AuthInfo };
+
+const DEFAULT_OPTIONS: McpServerMixinOptions = {
+	exposeBrokerTools: true,
+	exposeGenericTools: true,
+	toolNamePrefix: "",
+	tools: [],
+	refreshDebounceTime: 1000,
+	forwardMeta: ["user"],
+	sessionTimeout: 30 * 60 * 1000,
+	maxStoredEvents: 1000
+};
+
+/** Headers the MCP Streamable HTTP transport needs in the CORS configuration */
+const CORS_METHODS = ["GET", "POST", "DELETE", "OPTIONS"];
+const CORS_ALLOWED_HEADERS = [
+	"Content-Type",
+	"mcp-session-id",
+	"mcp-protocol-version",
+	"Last-Event-ID"
+];
+const CORS_EXPOSED_HEADERS = ["mcp-session-id"];
+
+function toList(value: string | string[] | undefined): string[] {
+	if (value == null) return [];
+	return Array.isArray(value) ? value : [value];
+}
+
+/**
+ * The CORS options of the MCP route: the user options, with the methods and headers needed by
+ * the transport always added (a user `allowedHeaders: ["Authorization"]` must not drop
+ * `Content-Type`). `cors: false` disables CORS.
+ */
+function buildCors(
+	userCors: boolean | CorsOptions | undefined,
+	allowedOrigins: string[] | undefined
+): false | CorsOptions {
+	if (userCors === false) return false;
+	const cors: CorsOptions = typeof userCors === "object" ? userCors : {};
+	return {
+		// Without `allowedOrigins` any origin is accepted (e.g. the MCP Inspector)
+		origin: allowedOrigins?.length ? allowedOrigins : "*",
+		...cors,
+		methods: _.uniq([...CORS_METHODS, ...toList(cors.methods)]),
+		allowedHeaders: _.uniq([...CORS_ALLOWED_HEADERS, ...toList(cors.allowedHeaders)]),
+		exposedHeaders: _.uniq([...CORS_EXPOSED_HEADERS, ...toList(cors.exposedHeaders)])
+	};
+}
+
+function jsonRpcError(code: number, message: string) {
+	return { jsonrpc: "2.0", error: { code, message }, id: null };
+}
+
+function parseJsonParams(jsonParams: unknown): unknown {
+	if (!jsonParams) return {};
+	try {
+		return JSON.parse(jsonParams as string);
+	} catch (err) {
+		throw new Error(
+			"The 'jsonParams' must be a valid JSON object string: " +
+				(err instanceof Error ? err.message : String(err)),
+			{ cause: err }
+		);
+	}
+}
+
 export function McpServerMixin(
 	mixinOptions?: McpServerMixinOptions
 ): Partial<ServiceSchema<ApiSettingsSchema>> {
-	mixinOptions = _.defaultsDeep(mixinOptions, {
-		routeOptions: {
-			path: "/mcp"
-		},
-		exposeBrokerTools: true,
-		exposeGenericTools: true,
-		toolNamePrefix: "",
-		tools: [],
-		refreshDebounceTime: 1000,
-		forwardMeta: ["user"],
-		sessionTimeout: 30 * 60 * 1000,
-		maxStoredEvents: 1000
-	});
+	// Shallow defaults: the user object is not modified, and user arrays (e.g. an empty
+	// `forwardMeta`) are not merged with the default ones
+	const options: McpServerMixinOptions = _.defaults({}, mixinOptions, DEFAULT_OPTIONS);
 
-	function createServer(broker: ServiceBroker) {
+	function createServer(broker: ServiceBroker, options: McpServerMixinOptions): McpSession {
 		const logger = broker.getLogger("MCP");
 
-		logger.info("Creating MCP server...");
+		logger.debug("Creating MCP server...");
 
 		const server = new McpServer(
 			{
@@ -89,11 +151,13 @@ export function McpServerMixin(
 			{
 				capabilities: {
 					tools: { listChanged: true }
-				}
+				},
+				// Registering or removing many tools (e.g. on a refresh) sends one notification
+				debouncedNotificationMethods: ["notifications/tools/list_changed"]
 			}
 		);
 
-		if (mixinOptions!.exposeBrokerTools !== false) {
+		if (options.exposeBrokerTools !== false) {
 			registerTool(
 				server,
 				"moleculer_list_nodes",
@@ -122,7 +186,7 @@ export function McpServerMixin(
 				async params => {
 					logger.debug("Listing Moleculer nodes...", params);
 					const nodes = getRegistry(broker).getNodeList(params);
-					return toTextResult(nodes, mixinOptions!.maxResultLength);
+					return toTextResult(nodes, options.maxResultLength);
 				}
 			);
 
@@ -174,7 +238,7 @@ export function McpServerMixin(
 				async params => {
 					logger.debug("Listing Moleculer services...", params);
 					const services = getRegistry(broker).getServiceList(params);
-					return toTextResult(services, mixinOptions!.maxResultLength);
+					return toTextResult(services, options.maxResultLength);
 				}
 			);
 
@@ -219,8 +283,8 @@ export function McpServerMixin(
 					// Same filters of `moleculer_call_action`: don't list what can't be called
 					const actions = getRegistry(broker)
 						.getActionList(params)
-						.filter(entry => isActionExposed(entry, mixinOptions!));
-					return toTextResult(actions, mixinOptions!.maxResultLength);
+						.filter(entry => isActionExposed(entry, options));
+					return toTextResult(actions, options.maxResultLength);
 				}
 			);
 
@@ -262,12 +326,12 @@ export function McpServerMixin(
 				async params => {
 					logger.debug("Listing Moleculer events...", params);
 					const events = getRegistry(broker).getEventList(params);
-					return toTextResult(events, mixinOptions!.maxResultLength);
+					return toTextResult(events, options.maxResultLength);
 				}
 			);
 		} // end exposeBrokerTools
 
-		if (mixinOptions!.exposeGenericTools !== false) {
+		if (options.exposeGenericTools !== false) {
 			registerTool(
 				server,
 				"moleculer_call_action",
@@ -299,32 +363,23 @@ export function McpServerMixin(
 
 					// The generic tool must not bypass the filters of the auto-discovered tools.
 					// Unknown actions are still called, to get the usual ServiceNotFoundError.
-					const entry = broker.registry.getActionList({}).find(a => a.name === action);
-					if (entry && !isActionExposed(entry, mixinOptions!)) {
+					const entry = getRegistry(broker)
+						.getActionList({})
+						.find(a => a.name === action);
+					if (entry && !isActionExposed(entry, options)) {
 						return toErrorResult(
 							new Error(`Action '${action}' is not exposed via MCP`)
 						);
 					}
 
-					let actionParams = {};
-					if (params.jsonParams) {
-						try {
-							actionParams = JSON.parse(params.jsonParams as string);
-						} catch (err) {
-							throw new Error(
-								"The 'jsonParams' must be a valid JSON object string: " +
-									err.message,
-								{ cause: err }
-							);
-						}
-					}
+					const actionParams = parseJsonParams(params.jsonParams);
 					try {
 						const result = await broker.call(
 							action,
 							actionParams,
-							getCallOptions(mixinOptions!, extra)
+							getCallOptions(options, extra)
 						);
-						return toTextResult(result, mixinOptions!.maxResultLength);
+						return toTextResult(result, options.maxResultLength);
 					} catch (err) {
 						logger.error("Error calling action:", err);
 						return toErrorResult(err);
@@ -367,23 +422,17 @@ export function McpServerMixin(
 					}
 					const event = params.event as string;
 
-					const allowedEvents = mixinOptions!.allowedEvents;
-					if (allowedEvents && !allowedEvents.some(pattern => match(event, pattern))) {
+					// Internal events (e.g. `$services.changed`, `$node.disconnected`) drive the
+					// broker and the services: they can be emitted only if explicitly allowed
+					const allowedEvents = options.allowedEvents;
+					const allowed = allowedEvents
+						? allowedEvents.some(pattern => match(event, pattern))
+						: !event.startsWith("$");
+					if (!allowed) {
 						return toErrorResult(new Error(`Event '${event}' is not allowed via MCP`));
 					}
 
-					let eventParams = {};
-					if (params.jsonParams) {
-						try {
-							eventParams = JSON.parse(params.jsonParams as string);
-						} catch (err) {
-							throw new Error(
-								"The 'jsonParams' must be a valid JSON object string: " +
-									err.message,
-								{ cause: err }
-							);
-						}
-					}
+					const eventParams = parseJsonParams(params.jsonParams);
 					try {
 						const opts = { meta: getForwardedMeta(extra) };
 						if (params.broadcast) {
@@ -408,11 +457,11 @@ export function McpServerMixin(
 		} // end exposeGenericTools
 
 		// Custom tools take precedence over the auto-discovered ones
-		registerCustomTools(server, broker, mixinOptions!);
+		registerCustomTools(server, broker, options);
 
 		// Auto-discovery: register per-action tools (after the other tools, so a clashing
 		// action tool name is skipped instead of breaking the session)
-		const autoTools = registerAutoDiscoveryTools(server, broker, mixinOptions!);
+		const autoTools = registerAutoDiscoveryTools(server, broker, options);
 
 		return { server, autoTools, lastActivity: Date.now(), openStreams: 0 };
 	}
@@ -426,22 +475,18 @@ export function McpServerMixin(
 
 		methods: {
 			/**
-			 * Make the forwarded `ctx.meta` fields of the HTTP request (e.g. the user set by the
-			 * route `authenticate` method) available to the tool handlers, through the
-			 * `authInfo` that the MCP SDK passes in the handler `extra` argument.
-			 */
-			/**
 			 * Protection against DNS rebinding attacks, as required by the MCP specification:
 			 * reject requests with a `Host` or `Origin` header not in `allowedHosts` /
 			 * `allowedOrigins`. Requests without `Origin` (non-browser clients) are accepted.
 			 * @returns true if the request has been rejected
 			 */
-			async rejectInvalidMcpHeaders(req, res): Promise<boolean> {
+			async rejectInvalidMcpHeaders(req: McpRequest, res: GatewayResponse): Promise<boolean> {
+				const options: McpServerMixinOptions = this.mcpOptions;
 				let error: string | null = null;
 
-				const allowedHosts = mixinOptions!.allowedHosts;
+				const allowedHosts = options.allowedHosts;
 				if (allowedHosts?.length) {
-					const host = req.headers.host as string | undefined;
+					const host = req.headers.host;
 					// Entries can be given with or without the port
 					const hostname = host?.replace(/:\d+$/, "");
 					if (
@@ -452,8 +497,8 @@ export function McpServerMixin(
 					}
 				}
 
-				const allowedOrigins = mixinOptions!.allowedOrigins;
-				const origin = req.headers.origin as string | undefined;
+				const allowedOrigins = options.allowedOrigins;
+				const origin = req.headers.origin;
 				if (
 					!error &&
 					allowedOrigins?.length &&
@@ -466,22 +511,189 @@ export function McpServerMixin(
 				if (!error) return false;
 
 				this.logger.warn(`Rejected MCP request: ${error}`);
-				res.statusCode = 403;
-				await this.sendResponse(
-					req,
-					res,
-					{ jsonrpc: "2.0", error: { code: -32000, message: error }, id: null },
-					{}
-				);
+				await this.sendMcpError(req, res, 403, jsonRpcError(-32000, error));
 				return true;
+			},
+
+			/** Send a JSON-RPC error response, unless the response has already been started */
+			async sendMcpError(
+				req: McpRequest,
+				res: GatewayResponse,
+				statusCode: number,
+				body: ReturnType<typeof jsonRpcError>
+			) {
+				if (res.headersSent) return;
+				res.statusCode = statusCode;
+				await this.sendResponse(req, res, body, {});
+			},
+
+			/**
+			 * Make the forwarded `ctx.meta` fields of the HTTP request (e.g. the user set by the
+			 * route `authenticate` method) available to the tool handlers, through the
+			 * `authInfo` that the MCP SDK passes in the handler `extra` argument.
+			 */
+			attachMcpMeta(req: McpRequest) {
+				const options: McpServerMixinOptions = this.mcpOptions;
+				const meta = _.pick(
+					(req.$ctx?.meta as Record<string, unknown>) ?? {},
+					options.forwardMeta ?? []
+				);
+				if (_.isEmpty(meta)) return;
+				req.auth = {
+					token: "",
+					clientId: "",
+					scopes: [],
+					...req.auth,
+					extra: { ...req.auth?.extra, [MCP_META_KEY]: meta }
+				};
+			},
+
+			async handleMcpPost(req: McpRequest, res: GatewayResponse) {
+				const options: McpServerMixinOptions = this.mcpOptions;
+				this.logger.debug("Received MCP POST request");
+				if (await this.rejectInvalidMcpHeaders(req, res)) return;
+				if (options.stateless) return this.handleStatelessMcpRequest(req, res);
+				try {
+					const sessionId = req.headers["mcp-session-id"] as string | undefined;
+
+					if (sessionId && this.transports.has(sessionId)) {
+						// Existing session: its transport is already connected to its server
+						const transport: StreamableHTTPServerTransport =
+							this.transports.get(sessionId);
+						this.trackMcpRequest(sessionId, res);
+						this.attachMcpMeta(req);
+						await transport.handleRequest(req, res);
+						return;
+					}
+
+					// New initialization request (no session ID or unknown session ID)
+					const session = createServer(this.broker, options);
+					const eventStore = new BoundedEventStore(options.maxStoredEvents!);
+					const transport: StreamableHTTPServerTransport =
+						new StreamableHTTPServerTransport({
+							sessionIdGenerator: () => randomUUID(),
+							eventStore, // Enable resumability
+							onsessioninitialized: (sessionId: string) => {
+								// Store the session as soon as it is initialized, before the
+								// response is sent, so the next requests of the client find it
+								this.logger.info(`Session initialized with ID: ${sessionId}`);
+								this.transports.set(sessionId, transport);
+								this.mcpSessions.set(sessionId, session);
+							}
+						});
+					session.transport = transport;
+
+					// Remove the session when its transport is closed (DELETE, idle, shutdown)
+					session.server.server.onclose = () => {
+						const sid = transport.sessionId;
+						if (!sid) return;
+						this.mcpSessions.delete(sid);
+						if (this.transports.delete(sid)) {
+							this.logger.info(`Transport closed for session ${sid}`);
+						}
+					};
+
+					// Connect the transport to the MCP server BEFORE handling the request
+					// so responses can flow back through the same transport
+					await session.server.connect(transport);
+
+					this.attachMcpMeta(req);
+					await transport.handleRequest(req, res);
+
+					// Not an initialization request (e.g. an expired session ID): the transport
+					// has rejected it and no session was created, release the server
+					if (!transport.sessionId) {
+						await session.server.close();
+					}
+				} catch (error) {
+					this.logger.error("Error handling MCP request:", error);
+					await this.sendMcpError(
+						req,
+						res,
+						500,
+						jsonRpcError(-32603, "Internal server error")
+					);
+				}
+			},
+
+			async handleMcpGet(req: McpRequest, res: GatewayResponse) {
+				const options: McpServerMixinOptions = this.mcpOptions;
+				this.logger.debug("Received MCP GET request");
+				if (await this.rejectInvalidMcpHeaders(req, res)) return;
+				if (options.stateless) return this.rejectStatelessMcpMethod(req, res);
+				const sessionId = req.headers["mcp-session-id"] as string | undefined;
+				if (!sessionId || !this.transports.has(sessionId)) {
+					await this.sendMcpError(
+						req,
+						res,
+						400,
+						jsonRpcError(-32000, "Bad Request: No valid session ID provided")
+					);
+					return;
+				}
+
+				// Last-Event-ID header: the client resumes the stream
+				const lastEventId = req.headers["last-event-id"] as string | undefined;
+				if (lastEventId) {
+					this.logger.debug(`Client reconnecting with Last-Event-ID: ${lastEventId}`);
+				} else {
+					this.logger.debug(`Establishing new MCP SSE stream for session ${sessionId}`);
+				}
+
+				try {
+					const transport: StreamableHTTPServerTransport = this.transports.get(sessionId);
+					this.trackMcpRequest(sessionId, res);
+					this.attachMcpMeta(req);
+					await transport.handleRequest(req, res);
+				} catch (error) {
+					this.logger.error("Error handling MCP SSE stream:", error);
+					await this.sendMcpError(
+						req,
+						res,
+						500,
+						jsonRpcError(-32603, "Internal server error")
+					);
+				}
+			},
+
+			async handleMcpDelete(req: McpRequest, res: GatewayResponse) {
+				const options: McpServerMixinOptions = this.mcpOptions;
+				if (await this.rejectInvalidMcpHeaders(req, res)) return;
+				if (options.stateless) return this.rejectStatelessMcpMethod(req, res);
+				const sessionId = req.headers["mcp-session-id"] as string | undefined;
+				if (!sessionId || !this.transports.has(sessionId)) {
+					await this.sendMcpError(
+						req,
+						res,
+						400,
+						jsonRpcError(-32000, "Bad Request: No valid session ID provided")
+					);
+					return;
+				}
+
+				this.logger.info(`Received session termination request for session ${sessionId}`);
+
+				try {
+					const transport: StreamableHTTPServerTransport = this.transports.get(sessionId);
+					this.attachMcpMeta(req);
+					await transport.handleRequest(req, res);
+				} catch (error) {
+					this.logger.error("Error handling session termination:", error);
+					await this.sendMcpError(
+						req,
+						res,
+						500,
+						jsonRpcError(-32603, "Error handling session termination")
+					);
+				}
 			},
 
 			/**
 			 * Stateless mode: a new server and transport for each request, closed when the
 			 * response ends. No session is kept, so any gateway instance can serve any request.
 			 */
-			async handleStatelessMcpRequest(req, res) {
-				const { server } = createServer(this.broker);
+			async handleStatelessMcpRequest(req: McpRequest, res: GatewayResponse) {
+				const { server } = createServer(this.broker, this.mcpOptions);
 				const transport = new StreamableHTTPServerTransport({
 					sessionIdGenerator: undefined
 				});
@@ -495,48 +707,24 @@ export function McpServerMixin(
 					await transport.handleRequest(req, res);
 				} catch (error) {
 					this.logger.error("Error handling stateless MCP request:", error);
-					if (!res.headersSent) {
-						res.statusCode = 500;
-						await this.sendResponse(
-							req,
-							res,
-							{
-								jsonrpc: "2.0",
-								error: { code: -32603, message: "Internal server error" },
-								id: null
-							},
-							{}
-						);
-					}
+					await this.sendMcpError(
+						req,
+						res,
+						500,
+						jsonRpcError(-32603, "Internal server error")
+					);
 				}
 			},
 
 			/** In stateless mode there are no SSE streams (GET) or sessions to terminate (DELETE) */
-			async rejectStatelessMcpMethod(req, res) {
-				res.statusCode = 405;
+			async rejectStatelessMcpMethod(req: McpRequest, res: GatewayResponse) {
 				res.setHeader("Allow", "POST");
-				await this.sendResponse(
+				await this.sendMcpError(
 					req,
 					res,
-					{
-						jsonrpc: "2.0",
-						error: { code: -32000, message: "Method not allowed in stateless mode" },
-						id: null
-					},
-					{}
+					405,
+					jsonRpcError(-32000, "Method not allowed in stateless mode")
 				);
-			},
-
-			attachMcpMeta(req) {
-				const meta = _.pick(req.$ctx?.meta ?? {}, mixinOptions!.forwardMeta ?? []);
-				if (_.isEmpty(meta)) return;
-				req.auth = {
-					token: "",
-					clientId: "",
-					scopes: [],
-					...req.auth,
-					extra: { ...req.auth?.extra, [MCP_META_KEY]: meta }
-				};
 			},
 
 			/**
@@ -550,24 +738,26 @@ export function McpServerMixin(
 					session.autoTools = registerAutoDiscoveryTools(
 						session.server,
 						this.broker,
-						mixinOptions!
+						this.mcpOptions
 					);
 				}
 			},
 
 			/** Close all the open MCP sessions (their transports and SSE streams) */
 			async closeMcpSessions() {
-				for (const [sessionId, transport] of this.transports) {
+				const transports = this.transports as Map<string, StreamableHTTPServerTransport>;
+				for (const [sessionId, transport] of transports) {
 					try {
 						this.logger.info(`Closing transport for session ${sessionId}`);
 						await transport.close();
-						this.transports.delete(sessionId);
 					} catch (error) {
 						this.logger.error(
 							`Error closing transport for session ${sessionId}:`,
 							error
 						);
 					}
+					transports.delete(sessionId);
+					this.mcpSessions.delete(sessionId);
 				}
 			},
 
@@ -575,7 +765,7 @@ export function McpServerMixin(
 			 * Track a request of a session until its response is closed (for SSE streams,
 			 * until the client disconnects), so busy sessions are not closed as idle.
 			 */
-			trackMcpRequest(sessionId: string, res) {
+			trackMcpRequest(sessionId: string, res: GatewayResponse) {
 				const session: McpSession | undefined = this.mcpSessions.get(sessionId);
 				if (!session) return;
 				session.openStreams++;
@@ -591,11 +781,11 @@ export function McpServerMixin(
 			 * `sessionTimeout` ms, e.g. clients gone away without a DELETE request.
 			 */
 			async closeIdleMcpSessions() {
+				const options: McpServerMixinOptions = this.mcpOptions;
 				const now = Date.now();
 				for (const [sessionId, session] of this.mcpSessions as Map<string, McpSession>) {
 					if (session.openStreams > 0) continue;
-					if (now - session.lastActivity < (mixinOptions!.sessionTimeout as number))
-						continue;
+					if (now - session.lastActivity < (options.sessionTimeout as number)) continue;
 
 					this.logger.info(`Closing idle MCP session ${sessionId}`);
 					try {
@@ -612,231 +802,49 @@ export function McpServerMixin(
 			this.transports = new Map<string, StreamableHTTPServerTransport>();
 			this.mcpSessions = new Map<string, McpSession>();
 
-			// The gateway's own actions (e.g. the moleculer-web `listAliases`, which lists all
-			// the routes) are infrastructure, not tools: never expose them
-			mixinOptions!.excludeActions = _.uniq([
-				...(mixinOptions!.excludeActions ?? []),
-				`${this.fullName}.*`
-			]);
+			// The options of this service: the gateway's own actions (e.g. the moleculer-web
+			// `listAliases`, which lists all the routes) are infrastructure, never tools
+			this.mcpOptions = {
+				...options,
+				excludeActions: _.uniq([...(options.excludeActions ?? []), `${this.fullName}.*`])
+			} satisfies McpServerMixinOptions;
 
-			if (mixinOptions!.refreshDebounceTime !== false) {
+			if (options.refreshDebounceTime !== false) {
 				this.debouncedRefreshMcpTools = _.debounce(
 					() => this.refreshMcpTools(),
-					mixinOptions!.refreshDebounceTime
+					options.refreshDebounceTime
 				);
 			}
 
-			const route = _.defaultsDeep(mixinOptions?.routeOptions, {
-				aliases: {
-					async "POST /"(req, res) {
-						this.logger.debug("Received MCP POST request");
-						if (await this.rejectInvalidMcpHeaders(req, res)) return;
-						if (mixinOptions!.stateless)
-							return this.handleStatelessMcpRequest(req, res);
-						try {
-							// Check for existing session ID
-							const sessionId = req.headers["mcp-session-id"] as string | undefined;
-							let transport: StreamableHTTPServerTransport;
-
-							if (sessionId && this.transports.has(sessionId)) {
-								// Reuse existing transport
-								transport = this.transports.get(sessionId)!;
-								this.trackMcpRequest(sessionId, res);
-							} else {
-								const session: McpSession = createServer(this.broker);
-								const { server } = session.server;
-
-								// New initialization request (no session ID or unknown session ID)
-								const eventStore = new BoundedEventStore(
-									mixinOptions!.maxStoredEvents!
-								);
-								transport = new StreamableHTTPServerTransport({
-									sessionIdGenerator: () => randomUUID(),
-									eventStore, // Enable resumability
-									onsessioninitialized: (sessionId: string) => {
-										// Store the transport by session ID when session is initialized
-										// This avoids race conditions where requests might come in before the session is stored
-										this.logger.info(
-											`Session initialized with ID: ${sessionId}`
-										);
-										this.transports.set(sessionId, transport);
-										this.mcpSessions.set(sessionId, session);
-									}
-								});
-
-								// Set up onclose handler to clean up transport when closed
-								session.transport = transport;
-
-								server.onclose = async () => {
-									const sid = transport.sessionId;
-									if (sid) this.mcpSessions.delete(sid);
-									if (sid && this.transports.has(sid)) {
-										this.logger.info(
-											`Transport closed for session ${sid}, removing from transports map`
-										);
-										this.transports.delete(sid);
-									}
-								};
-
-								// Connect the transport to the MCP server BEFORE handling the request
-								// so responses can flow back through the same transport
-								await server.connect(transport);
-
-								this.attachMcpMeta(req);
-								await transport.handleRequest(req, res);
-
-								return; // Already handled
-							}
-
-							// Handle the request with existing transport - no need to reconnect
-							// The existing transport is already connected to the server
-							this.attachMcpMeta(req);
-							await transport.handleRequest(req, res);
-						} catch (error) {
-							this.logger.error("Error handling MCP request:", error);
-							if (!res.headersSent) {
-								res.statusCode = 500;
-								await this.sendResponse(
-									req,
-									res,
-									{
-										jsonrpc: "2.0",
-										error: {
-											code: -32603,
-											message: "Internal server error"
-										},
-										id: req?.body?.id
-									},
-									{}
-								);
-								return;
-							}
-						}
-					},
-
-					async "GET /"(req, res) {
-						this.logger.debug("Received MCP GET request");
-						if (await this.rejectInvalidMcpHeaders(req, res)) return;
-						if (mixinOptions!.stateless) return this.rejectStatelessMcpMethod(req, res);
-						const sessionId = req.headers["mcp-session-id"] as string | undefined;
-						if (!sessionId || !this.transports.has(sessionId)) {
-							res.statusCode = 400;
-							await this.sendResponse(
-								req,
-								res,
-								{
-									jsonrpc: "2.0",
-									error: {
-										code: -32000,
-										message: "Bad Request: No valid session ID provided"
-									},
-									id: req?.body?.id
-								},
-								{}
-							);
-							return;
-						}
-
-						// Check for Last-Event-ID header for resumability
-						const lastEventId = req.headers["last-event-id"] as string | undefined;
-						if (lastEventId) {
-							this.logger.info(
-								`Client reconnecting with Last-Event-ID: ${lastEventId}`
-							);
-						} else {
-							this.logger.info(
-								`Establishing new MCP SSE stream for session ${sessionId}`
-							);
-						}
-
-						const transport = this.transports.get(sessionId);
-						this.trackMcpRequest(sessionId, res);
-						this.attachMcpMeta(req);
-						await transport!.handleRequest(req, res);
-					},
-
-					async "DELETE /"(req, res) {
-						if (await this.rejectInvalidMcpHeaders(req, res)) return;
-						if (mixinOptions!.stateless) return this.rejectStatelessMcpMethod(req, res);
-						const sessionId = req.headers["mcp-session-id"] as string | undefined;
-						if (!sessionId || !this.transports.has(sessionId)) {
-							res.statusCode = 400;
-							await this.sendResponse(
-								req,
-								res,
-								{
-									jsonrpc: "2.0",
-									error: {
-										code: -32000,
-										message: "Bad Request: No valid session ID provided"
-									},
-									id: req?.body?.id
-								},
-								{}
-							);
-							return;
-						}
-
-						this.logger.info(
-							`Received session termination request for session ${sessionId}`
-						);
-
-						try {
-							const transport = this.transports.get(sessionId);
-							this.attachMcpMeta(req);
-							await transport!.handleRequest(req, res);
-						} catch (error) {
-							this.logger.error("Error handling session termination:", error);
-							if (!res.headersSent) {
-								res.statusCode = 500;
-								await this.sendResponse(
-									req,
-									res,
-									{
-										jsonrpc: "2.0",
-										error: {
-											code: -32603,
-											message: "Error handling session termination"
-										},
-										id: req?.body?.id
-									},
-									{}
-								);
-								return;
-							}
-						}
-					}
-				},
-
+			const userRoute = options.routeOptions ?? {};
+			const route: ApiRouteSchema = {
 				mappingPolicy: "restrict",
-
-				cors: {
-					// Without `allowedOrigins` any origin is accepted (e.g. the MCP Inspector)
-					origin: mixinOptions!.allowedOrigins?.length
-						? mixinOptions!.allowedOrigins
-						: "*",
-					methods: ["GET", "POST", "DELETE", "OPTIONS"],
-					allowedHeaders: [
-						"Content-Type",
-						"mcp-session-id",
-						"mcp-protocol-version",
-						"Last-Event-ID"
-					],
-					exposedHeaders: ["mcp-session-id"]
+				...userRoute,
+				path: userRoute.path ?? "/mcp",
+				aliases: {
+					...userRoute.aliases,
+					"POST /": (req: McpRequest, res: GatewayResponse) =>
+						this.handleMcpPost(req, res),
+					"GET /": (req: McpRequest, res: GatewayResponse) => this.handleMcpGet(req, res),
+					"DELETE /": (req: McpRequest, res: GatewayResponse) =>
+						this.handleMcpDelete(req, res)
 				},
-
+				// The moleculer-web 0.10 typings don't accept `cors: false` (supported at runtime)
+				cors: buildCors(userRoute.cors, options.allowedOrigins) as CorsOptions,
 				bodyParsers: {
-					json: false // The mcp server will read the raw body itself
+					...(typeof userRoute.bodyParsers === "object" ? userRoute.bodyParsers : {}),
+					// The transport reads the raw body itself
+					json: false
 				}
-			});
+			};
 
-			// Add route
-			this.settings.routes.unshift(route);
+			(this.settings.routes ??= []).unshift(route);
 		},
 
 		started() {
-			if (mixinOptions!.sessionTimeout !== false) {
-				const timeout = mixinOptions!.sessionTimeout!;
+			const options: McpServerMixinOptions = this.mcpOptions;
+			if (options.sessionTimeout !== false) {
+				const timeout = options.sessionTimeout!;
 				this.mcpIdleTimer = setInterval(
 					() => this.closeIdleMcpSessions(),
 					Math.min(timeout, 60 * 1000)
@@ -848,9 +856,9 @@ export function McpServerMixin(
 			// this one when ApiGateway comes first in `mixins`: an open SSE stream would keep
 			// `server.close()` waiting forever. Close the MCP sessions before the server.
 			const server = this.server;
-			if (server) {
+			if (server && !server.mcpCloseWrapped) {
 				const close = server.close.bind(server);
-				server.close = callback => {
+				server.close = (callback?: (err?: Error) => void) => {
 					this.closeMcpSessions().finally(() => {
 						// Keep-alive connections left by the closed streams
 						server.closeIdleConnections?.();
@@ -858,6 +866,8 @@ export function McpServerMixin(
 					});
 					return server;
 				};
+				// The service can be restarted: wrap only once
+				server.mcpCloseWrapped = true;
 			}
 		},
 

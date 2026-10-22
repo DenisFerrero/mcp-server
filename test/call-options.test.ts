@@ -6,6 +6,7 @@ import type { McpServerMixinOptions } from "../src/index.js";
 import { toTextResult } from "../src/utils.js";
 import { createMcpClient, closeMcpClient, callTool } from "./mcp-client.js";
 import type { Server } from "http";
+import type { TextContent } from "@modelcontextprotocol/sdk/types.js";
 import type { AddressInfo } from "net";
 
 describe("callOptions & maxResultLength", () => {
@@ -121,7 +122,7 @@ describe("callOptions & maxResultLength", () => {
 		});
 
 		it("should keep the first maxLength characters", () => {
-			const text = toTextResult("x".repeat(50), 10).content[0].text as string;
+			const text = (toTextResult("x".repeat(50), 10).content[0] as TextContent).text;
 			expect(text.startsWith('"xxxxxxxxx')).toBe(true);
 			expect(text).toContain("[Result truncated: 10 of 52 characters.");
 		});

@@ -151,7 +151,8 @@ export function registerAutoDiscoveryTools(
 		const mcpMeta = typeof actionDef.mcp === "object" ? actionDef.mcp : {};
 
 		// Tool name
-		const toolName = mcpMeta.name || prefix + actionName.replace(/\./g, "_");
+		// Only letters, digits, "_" and "-" are valid in tool names (e.g. `v2.users.get` → `v2_users_get`)
+		const toolName = mcpMeta.name || prefix + actionName.replace(/[^a-zA-Z0-9_-]/g, "_");
 
 		// Description
 		const description =
@@ -203,7 +204,7 @@ export function registerAutoDiscoveryTools(
 			continue;
 		}
 
-		logger.info(`Registered tool: ${toolName} → ${actionName}`);
+		logger.debug(`Registered tool: ${toolName} → ${actionName}`);
 	}
 
 	return registered;

@@ -65,7 +65,7 @@ export function registerCustomTools(
 			continue;
 		}
 
-		logger.info(
+		logger.debug(
 			`Registered custom tool: ${def.name} → ${typeof def.handler === "string" ? def.handler : "<function>"}`
 		);
 	}

@@ -7,6 +7,10 @@ All notable changes to this project will be documented in this file.
 ### Breaking changes
 
 - **Node.js 22.12 or newer is required** (it was 20, which reached its end of life on 2026-04-30). Moleculer 0.15 and moleculer-web 0.11 already require Node 22. CI runs the tests on Node 22, 24 and 26.
+- **`moleculer_emit_event` doesn't emit internal events** (`$services.changed`, `$node.*`, ...) unless they match `allowedEvents`.
+- **Tool registration logs are at `debug` level** (they were at `info`, one line per tool for every session).
+- **`routeOptions` is typed as `Partial<ApiRouteSchema>`** and merged with the MCP route options instead of deep-merged: the MCP aliases can't be replaced, the CORS methods and headers needed by MCP are added to the user ones, and `bodyParsers.json` is always `false`.
+- **Packaging** — The type declarations are emitted next to each build (`dist/cjs`, `dist/esm`): CommonJS projects with `moduleResolution: node16`/`nodenext` got the ESM declarations. `dist/types` doesn't exist anymore.
 - **`moleculer-web` is a peer dependency** (`^0.10.0 || ^0.11.0`). The mixin already needed it to work, and the published type declarations import its types.
 - **Only `published` actions are auto-discovered.** Actions with `visibility: "public" | "protected" | "private"` are no longer exposed as MCP tools, consistently with the API gateway.
 - **Tool errors are flagged with `isError: true`** and no longer include the stack trace. The payload now contains `name`, `message`, `code`, `type`, `data`.
@@ -43,6 +47,14 @@ All notable changes to this project will be documented in this file.
 - **SSE resumability of the standalone stream** — The SDK example store could not resume the `_GET_stream`, because it extracted the stream ID splitting the event ID on `_`.
 - **Custom tools without `input`** — The handler received the SDK `extra` object in place of the params.
 - **Shutdown hanging with connected clients** — An open SSE stream kept the moleculer-web `server.close()` waiting forever, so `broker.stop()` never returned while a MCP client was connected.
+- **`forwardMeta: []` forwarded the `user` anyway** — The options were deep-merged with the defaults, so an empty array got the default `"user"` back. The user options object is not modified anymore.
+- **CORS `allowedHeaders` set in `routeOptions` dropped `Content-Type`** — The arrays were merged by index with the default ones, breaking the browser clients.
+- **Free-form object params arrived empty** — `{ type: "object" }` was converted to `z.object({})`, which strips every property, and objects with `props` lost the unknown properties that fastest-validator keeps. Objects now keep them unless `strict` is set.
+- **Schema converter** — Nested objects with the `$$type` shorthand, `patternFlags` and dynamic (function) defaults are converted.
+- **Tool names** — Characters not valid in a MCP tool name (anything but letters, digits, `_` and `-`) are replaced with `_`.
+- **Protocol errors** — JSON-RPC errors had no `id` (now `null`), errors of `GET` requests were not handled, and a non-initialization request without a valid session left a connected server behind.
+- **Tool list notifications** — Registering or removing many tools (e.g. on a refresh) sends one `tools/list_changed` notification instead of one per tool.
+- **MCP client example** — It passed `parameters` instead of `arguments` and listed resources, which the server doesn't support.
 - **Cross-platform npm scripts** — `dev`, `inspect` and `build` only worked on Windows or only on POSIX shells.
 
 ## 0.2.0 (2026-03-28)

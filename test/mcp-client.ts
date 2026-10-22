@@ -4,7 +4,10 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { Tool, CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { Tool, CallToolResult, TextContent } from "@modelcontextprotocol/sdk/types.js";
+
+/** A tool result with text contents: the tools of the mixin always return text */
+export type TextToolResult = Omit<CallToolResult, "content"> & { content: TextContent[] };
 
 export interface TestMcpClient {
 	client: Client;
@@ -16,31 +19,20 @@ export async function createMcpClient(
 	serverUrl: string,
 	headers?: Record<string, string>
 ): Promise<TestMcpClient> {
-	const client = new Client(
-		{
-			name: "test-client",
-			version: "1.0.0"
-		},
-		{
-			capabilities: {
-				tools: {}
-			}
-		}
-	);
+	const client = new Client({
+		name: "test-client",
+		version: "1.0.0"
+	});
 
 	const transport = new StreamableHTTPClientTransport(new URL(serverUrl), {
 		requestInit: headers ? { headers } : undefined
 	});
 	await client.connect(transport);
 
-	// Get session ID from the transport
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const sessionId = (transport as any).sessionId;
-
 	return {
 		client,
 		transport,
-		sessionId: sessionId || "test-session"
+		sessionId: transport.sessionId || "test-session"
 	};
 }
 
@@ -73,10 +65,10 @@ export async function callTool(
 	toolName: string,
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	arguments_: Record<string, any>
-): Promise<CallToolResult> {
+): Promise<TextToolResult> {
 	const result = await mcpClient.client.callTool({
 		name: toolName,
 		arguments: arguments_
 	});
-	return result;
+	return result as TextToolResult;
 }

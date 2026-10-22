@@ -5,13 +5,17 @@
 	"type": "module",
 	"main": "./dist/cjs/index.js",
 	"module": "./dist/esm/index.js",
-	"types": "./dist/types/index.d.ts",
+	"types": "./dist/cjs/index.d.ts",
 	"exports": {
 		".": {
-			"types": "./dist/types/index.d.ts",
-			"require": "./dist/cjs/index.js",
-			"import": "./dist/esm/index.js",
-			"default": "./src/index.ts"
+			"import": {
+				"types": "./dist/esm/index.d.ts",
+				"default": "./dist/esm/index.js"
+			},
+			"require": {
+				"types": "./dist/cjs/index.d.ts",
+				"default": "./dist/cjs/index.js"
+			}
 		}
 	},
 	"files": [
@@ -30,9 +34,10 @@
 		"ci-update-deps": "ncu -u",
 		"lint": "eslint --ext=.ts src examples test",
 		"lint:fix": "eslint --ext=.ts src examples test --fix",
-		"check": "tsc --noEmit true",
+		"check": "tsc",
+		"check:src": "tsc -p tsconfig.build.json --noEmit",
 		"prebuild": "rimraf dist",
-		"build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 tsc -b tsconfig.cjs.json tsconfig.esm.json tsconfig.types.json",
+		"build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 tsc -p tsconfig.cjs.json && tsc -p tsconfig.esm.json",
 		"postbuild": "node scripts/postbuild.mjs",
 		"prepack": "npm run build",
 		"version": "node scripts/sync-version.mjs && git add src/version.ts"

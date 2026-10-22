@@ -112,6 +112,17 @@ describe("Security", () => {
 			}
 		});
 
+		it("should not forward anything with an empty forwardMeta", async () => {
+			await start({ forwardMeta: [] });
+			const mcpClient = await connect({ Authorization: "Bearer john" });
+			try {
+				const result = parse(await callTool(mcpClient, "whoami_get", {}));
+				expect(result).toEqual({ user: null, tenant: null });
+			} finally {
+				await closeMcpClient(mcpClient);
+			}
+		});
+
 		it("should forward the user to the generic tools and custom tools", async () => {
 			await start({
 				tools: [
@@ -234,6 +245,34 @@ describe("Security", () => {
 			} finally {
 				await closeMcpClient(mcpClient);
 			}
+		});
+	});
+
+	describe("Internal events", () => {
+		async function emit(options: McpServerMixinOptions, event: string) {
+			await start(options);
+			const mcpClient = await connect();
+			try {
+				return await callTool(mcpClient, "moleculer_emit_event", { event });
+			} finally {
+				await closeMcpClient(mcpClient);
+			}
+		}
+
+		it("should not emit internal ($) events by default", async () => {
+			const result = await emit({}, "$services.changed");
+			expect(result.isError).toBe(true);
+			expect(result.content[0].text).toContain(
+				"Event '$services.changed' is not allowed via MCP"
+			);
+		});
+
+		it("should emit internal events matched by allowedEvents", async () => {
+			const result = await emit(
+				{ allowedEvents: ["$services.changed"] },
+				"$services.changed"
+			);
+			expect(result.isError).toBeFalsy();
 		});
 	});
 

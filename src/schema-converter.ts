@@ -1,4 +1,4 @@
-import { z, ZodTypeAny } from "zod";
+import { z, type ZodTypeAny } from "zod";
 
 // fastest-validator schema definitions are inherently untyped
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -97,7 +97,10 @@ function convertSingleField(def: ValidatorDef): ZodTypeAny {
 	if (def.nullable === true) {
 		schema = schema.nullable();
 	}
-	if (def.default !== undefined) {
+	if (typeof def.default === "function") {
+		// A dynamic default (e.g. `() => Date.now()`) is applied by the action itself
+		schema = schema.optional();
+	} else if (def.default !== undefined) {
 		schema = schema.default(def.default);
 	}
 	if (def.optional === true) {
@@ -113,7 +116,7 @@ function buildString(def: ValidatorDef): ZodTypeAny {
 	if (def.length != null) s = s.length(def.length);
 	if (def.min != null) s = s.min(def.min);
 	if (def.max != null) s = s.max(def.max);
-	if (def.pattern) s = s.regex(new RegExp(def.pattern));
+	if (def.pattern) s = s.regex(new RegExp(def.pattern, def.patternFlags));
 	for (const [flag, pattern] of Object.entries(STRING_FLAG_PATTERNS)) {
 		if (def[flag] === true) s = s.regex(pattern);
 	}
@@ -151,14 +154,24 @@ function buildArray(def: ValidatorDef): ZodTypeAny {
 function buildObject(def: ValidatorDef): ZodTypeAny {
 	// fastest-validator accepts both `props` and `properties`
 	const props = def.props ?? def.properties;
-	if (props) {
-		const shape: Record<string, ZodTypeAny> = {};
-		for (const [key, val] of Object.entries(props)) {
-			shape[key] = parseFieldDef(val);
-		}
-		return z.object(shape);
+	const shape: Record<string, ZodTypeAny> = {};
+	for (const [key, val] of Object.entries(props ?? {})) {
+		shape[key] = parseFieldDef(val);
 	}
-	return z.object({});
+	const object = z.object(shape);
+	// Like fastest-validator, unknown properties are kept unless `strict` is set: the Zod
+	// default would strip them, and an object without `props` would always arrive empty
+	if (def.strict === true) return object.strict();
+	if (def.strict === "remove") return object;
+	return object.passthrough();
+}
+
+/**
+ * The fastest-validator shorthand of nested objects: `{ $$type: "object|optional", city: "string" }`
+ */
+function convertShorthandObject(def: ValidatorDef): ZodTypeAny {
+	const { $$type, ...props } = def;
+	return convertSingleField({ ...parsePipeSyntax($$type), type: "object", props });
 }
 
 function buildEnum(def: ValidatorDef): ZodTypeAny {
@@ -287,6 +300,7 @@ function parseFieldDef(field: unknown): ZodTypeAny {
 	}
 	if (typeof field === "object" && field !== null) {
 		const def = field as ValidatorDef;
+		if (typeof def.$$type === "string") return convertShorthandObject(def);
 		// e.g. `{ $$root: true, type: "string|min:3" }`
 		if (typeof def.type === "string" && def.type.includes("|")) {
 			return convertSingleField({ ...def, ...parsePipeSyntax(def.type) });

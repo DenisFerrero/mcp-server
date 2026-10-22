@@ -37,7 +37,11 @@ export interface McpCustomTool {
 }
 
 export interface McpServerMixinOptions {
-	routeOptions?: ApiRouteSchema;
+	/**
+	 * moleculer-web route options of the MCP route. The MCP aliases, the methods and headers
+	 * needed in `cors` and `bodyParsers.json: false` are always added. Default path: "/mcp"
+	 */
+	routeOptions?: Partial<ApiRouteSchema>;
 
 	/** Whitelist of service names (array) or glob pattern (string) */
 	services?: string | string[];

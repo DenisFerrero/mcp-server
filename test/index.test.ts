@@ -16,7 +16,8 @@ interface ApiServiceSettings {
 
 describe("MCP Server Integration Tests", () => {
 	let broker: ServiceBroker;
-	let apiService;
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	let apiService: any;
 	const port = 0; // Use random available port
 
 	beforeEach(async () => {
@@ -203,7 +204,7 @@ describe("MCP Server Integration Tests", () => {
 		// Check node structure
 		const localNode = nodes.find((n: (typeof nodes)[number]) => n.local === true);
 		expect(localNode).toBeDefined();
-		expect(localNode.available).toBe(true);
+		expect(localNode!.available).toBe(true);
 	});
 
 	it("should list all events via MCP tool", async () => {
@@ -626,7 +627,7 @@ describe("MCP Server Integration Tests", () => {
 			// Check node structure
 			const localNode = nodes.find((n: (typeof nodes)[number]) => n.local === true);
 			expect(localNode).toBeDefined();
-			expect(localNode.available).toBe(true);
+			expect(localNode!.available).toBe(true);
 
 			// Verify that getNodeList was called with correct parameters (including defaults)
 			expect(getNodeListSpy).toHaveBeenCalledWith({
