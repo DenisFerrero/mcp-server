@@ -473,6 +473,14 @@ These tools are registered regardless of `exposeBrokerTools`, unless `exposeGene
 claude mcp add --transport http moleculer http://127.0.0.1:3000/mcp
 ```
 
+With `authentication` enabled on the route, pass the token as a header:
+
+```bash
+claude mcp add --transport http moleculer http://127.0.0.1:3000/mcp --header "Authorization: Bearer <token>"
+```
+
+`claude mcp list` checks the connection: with a wrong token it shows the `401` of the server.
+
 ### Claude Desktop
 
 `claude_desktop_config.json` starts local (stdio) servers only: connect a server running on your machine through the [`mcp-remote`](https://github.com/geelen/mcp-remote) bridge, which needs Node.js 18 or newer. Open the file from Settings → Developer → Edit Config, then restart Claude Desktop:
@@ -482,7 +490,7 @@ claude mcp add --transport http moleculer http://127.0.0.1:3000/mcp
   "mcpServers": {
     "moleculer": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "http://localhost:3000/mcp"]
+      "args": ["-y", "mcp-remote@0.14.3", "http://localhost:3000/mcp"]
     }
   }
 }
@@ -497,7 +505,7 @@ With `authentication` enabled on the route, pass the token as a header. Keep the
       "command": "npx",
       "args": [
         "-y",
-        "mcp-remote",
+        "mcp-remote@0.14.3",
         "http://localhost:3000/mcp",
         "--header",
         "Authorization:${AUTH_HEADER}"
@@ -511,6 +519,10 @@ With `authentication` enabled on the route, pass the token as a header. Keep the
 ```
 
 `mcp-remote` accepts plain HTTP only for `localhost` and `127.0.0.1`: for a server on another machine of a trusted private network add the `--allow-http` flag.
+
+The version of `mcp-remote` is pinned on purpose: without it, `npx` runs the latest release, published by a third party, on every start of Claude Desktop. `0.14.3` is the version tested with this package (`test/mcp-remote.test.ts` runs these configurations); update it after checking the new release.
+
+With a wrong token the server answers `401` and `mcp-remote` tries an OAuth login, which this package doesn't support: the client registration fails and `mcp-remote` exits with `Dynamic Client Registration rejected (HTTP 404)` in its log, without opening a browser. Check the token in `AUTH_HEADER`.
 
 ### Generic MCP Client
 
