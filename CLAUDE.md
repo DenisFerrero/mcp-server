@@ -30,6 +30,7 @@ test/
   request-context.test.ts # requestID, parent span and caller of the tool calls
   options.test.ts       # Mixin options, routeOptions merge, protocol errors
   session-owner.test.ts # Sessions bound to their user (sessionOwner)
+  mcp-remote.test.ts    # README Claude Desktop configurations through mcp-remote (pinned devDependency)
   mcp-client.ts         # Test MCP client helper
   setup.ts              # Vitest setup: random ports never get a port refused by `fetch` ("bad port")
 examples/
