@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Breaking changes
 
+- **Node.js 22.12 or newer is required** (it was 20, which reached its end of life on 2026-04-30). Moleculer 0.15 and moleculer-web 0.11 already require Node 22. CI runs the tests on Node 22, 24 and 26.
 - **Only `published` actions are auto-discovered.** Actions with `visibility: "public" | "protected" | "private"` are no longer exposed as MCP tools, consistently with the API gateway.
 - **Tool errors are flagged with `isError: true`** and no longer include the stack trace. The payload now contains `name`, `message`, `code`, `type`, `data`.
 - **`moleculer_call_action` applies the auto-discovery filters.** Internal (`$`), not published, `mcp: false` actions and the ones filtered by `services`/`excludeActions` return a `not exposed via MCP` error.

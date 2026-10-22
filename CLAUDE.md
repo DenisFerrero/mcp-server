@@ -84,7 +84,7 @@ npm run inspect   # MCP Inspector UI: connect it to http://localhost:3300/mcp (S
 
 ## Tech Stack
 
-- TypeScript 6, Node.js >= 20
+- TypeScript 6, Node.js >= 22.12
 - `@modelcontextprotocol/sdk` ^1.18.0, `zod` ^3.25, `lodash`
 - `moleculer` ^0.14.12 || ^0.15.0 (peerDep); CI also runs the tests with moleculer 0.14 + moleculer-web 0.10
 - The Moleculer 0.14 typings miss some registry methods: use `getRegistry()` in `src/index.ts`

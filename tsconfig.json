@@ -5,11 +5,11 @@
 		"checkJs": true,
 		"skipLibCheck": true,
 		"forceConsistentCasingInFileNames": true,
-		"lib": ["es2023"],
+		"lib": ["es2024"],
 		"types": ["node"],
 		"module": "node16",
 		"moduleResolution": "node16",
-		"target": "es2022",
+		"target": "es2023",
 
 		"declaration": false,
 		"outDir": "dist",
