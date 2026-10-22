@@ -39,7 +39,7 @@
 		"prebuild": "rimraf dist",
 		"build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 tsc -p tsconfig.cjs.json && tsc -p tsconfig.esm.json",
 		"postbuild": "node scripts/postbuild.mjs",
-		"prepack": "npm run build",
+		"prepare": "npm run build",
 		"version": "node scripts/sync-version.mjs && git add src/version.ts"
 	},
 	"keywords": [
