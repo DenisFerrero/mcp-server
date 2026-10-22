@@ -109,6 +109,17 @@ export interface McpServerMixinOptions {
 	 */
 	stateless?: boolean;
 
+	/**
+	 * Max number of open sessions of this gateway instance: further initialization requests are
+	 * rejected with `503` until a session is closed (DELETE request or `sessionTimeout`).
+	 * It protects the memory from clients (or attackers) opening sessions without closing them:
+	 * each session keeps its own MCP server, with all the tools, and up to `maxStoredEvents`
+	 * SSE events (about 0.5 MB with 25 tools, plus the events). Set it on the expected concurrent
+	 * clients and the available memory, or `null` for no limit. Not used in stateless mode.
+	 * Default: 100
+	 */
+	maxSessions?: number | null;
+
 	/** Max number of SSE events kept in memory per session for resumability. Default: 1000 */
 	maxStoredEvents?: number;
 

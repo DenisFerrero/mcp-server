@@ -63,7 +63,9 @@ describe("Options and route", () => {
 		method: string,
 		headers: Record<string, string>,
 		body?: string,
-		path = "/mcp"
+		path = "/mcp",
+		// Send the headers immediately and the body after this delay (ms), as a slow client
+		bodyDelay = 0
 	): Promise<RawResponse> {
 		return new Promise((resolve, reject) => {
 			const req = http.request(
@@ -87,6 +89,12 @@ describe("Options and route", () => {
 				}
 			);
 			req.on("error", reject);
+			if (body && bodyDelay) {
+				req.setHeader("Content-Length", Buffer.byteLength(body));
+				req.flushHeaders();
+				setTimeout(() => req.end(body), bodyDelay);
+				return;
+			}
 			if (body) req.write(body);
 			req.end();
 		});
@@ -202,6 +210,120 @@ describe("Options and route", () => {
 				error: { code: -32000, message: "Bad Request: No valid session ID provided" },
 				id: null
 			});
+		});
+	});
+
+	describe("maxSessions", () => {
+		const initialize = () => request("POST", {}, INITIALIZE);
+
+		it("should limit the open sessions to 100 by default", async () => {
+			await start();
+			expect(apiService.mcpOptions.maxSessions).toBe(100);
+		});
+
+		it("should reject new sessions over the limit until a session is closed", async () => {
+			await start({ maxSessions: 2 });
+			const first = await initialize();
+			expect(first.status).toBe(200);
+			expect((await initialize()).status).toBe(200);
+
+			const rejected = await initialize();
+			expect(rejected.status).toBe(503);
+			expect(JSON.parse(rejected.body).error.message).toBe(
+				"Too many MCP sessions, retry later"
+			);
+			expect(apiService.mcpSessions.size).toBe(2);
+
+			// The existing sessions still work, and closing one frees a slot
+			const sessionId = first.headers["mcp-session-id"] as string;
+			expect((await request("DELETE", { "mcp-session-id": sessionId })).status).toBe(200);
+			expect((await initialize()).status).toBe(200);
+		});
+
+		it("should count the sessions being initialized concurrently", async () => {
+			await start({ maxSessions: 2 });
+			// Slow bodies: all the requests are being handled before any session is initialized
+			const results = await Promise.all(
+				Array.from({ length: 6 }, () => request("POST", {}, INITIALIZE, "/mcp", 100))
+			);
+			const statuses = results.map(r => r.status).sort();
+			expect(statuses).toEqual([200, 200, 503, 503, 503, 503]);
+			expect(apiService.mcpSessions.size).toBe(2);
+		});
+
+		it("should not limit the sessions with null", async () => {
+			await start({ maxSessions: null });
+			for (let i = 0; i < 5; i++) expect((await initialize()).status).toBe(200);
+			expect(apiService.mcpSessions.size).toBe(5);
+		});
+	});
+
+	describe("Other gateways", () => {
+		async function expectGatewayHidden(gatewayName: string) {
+			const mcpClient = await connect();
+			try {
+				const names = (await listTools(mcpClient)).map(t => t.name);
+				expect(names.some(n => n.startsWith(`${gatewayName}_`))).toBe(false);
+				expect(names).toContain("v2_items_search");
+
+				const call = await callTool(mcpClient, "moleculer_call_action", {
+					action: `${gatewayName}.listAliases`
+				});
+				expect(call.isError).toBe(true);
+				expect(call.content[0].text).toContain("is not exposed via MCP");
+
+				const list = await callTool(mcpClient, "moleculer_list_actions", {});
+				const actions = JSON.parse(list.content[0].text).map(
+					(a: { name: string }) => a.name
+				);
+				expect(actions).not.toContain(`${gatewayName}.listAliases`);
+			} finally {
+				await closeMcpClient(mcpClient);
+			}
+		}
+
+		it("should never expose the actions of the other gateways of the node", async () => {
+			broker = new ServiceBroker({ logger: false });
+			apiService = broker.createService({
+				name: "api",
+				mixins: [ApiGateway, McpServerMixin()],
+				settings: { port: 0, routes: [] }
+			});
+			broker.createService({ name: "www", mixins: [ApiGateway], settings: { port: 0 } });
+			broker.createService({
+				name: "items",
+				version: 2,
+				actions: { search: { params: { filter: "object" }, handler: () => [] } }
+			});
+			await broker.start();
+			port = (apiService.server.address() as AddressInfo).port;
+			await expectGatewayHidden("www");
+		});
+
+		it("should never expose the actions of the gateways of the other nodes", async () => {
+			const transporter = "Fake";
+			const remote = new ServiceBroker({ nodeID: "remote", transporter, logger: false });
+			remote.createService({ name: "www", mixins: [ApiGateway], settings: { port: 0 } });
+			remote.createService({
+				name: "items",
+				version: 2,
+				actions: { search: { params: { filter: "object" }, handler: () => [] } }
+			});
+			broker = new ServiceBroker({ nodeID: "local", transporter, logger: false });
+			apiService = broker.createService({
+				name: "api",
+				mixins: [ApiGateway, McpServerMixin()],
+				settings: { port: 0, routes: [] }
+			});
+			try {
+				await remote.start();
+				await broker.start();
+				await broker.waitForServices(["www", "v2.items"]);
+				port = (apiService.server.address() as AddressInfo).port;
+				await expectGatewayHidden("www");
+			} finally {
+				await remote.stop();
+			}
 		});
 	});
 

@@ -17,7 +17,8 @@ All notable changes to this project will be documented in this file.
 - **`moleculer_call_action` applies the auto-discovery filters.** Internal (`$`), not published, `mcp: false` actions and the ones filtered by `services`/`excludeActions` return a `not exposed via MCP` error.
 - **Sessions are closed after 30 minutes of inactivity** (no requests, no open SSE stream). See `sessionTimeout`.
 - **Tool params are logged at `debug` level** (they were logged at `info`).
-- **The gateway's own actions are never exposed** (e.g. the moleculer-web `api.listAliases`, which lists all the routes).
+- **The actions of the moleculer-web gateways are never exposed** — The gateway's own ones and the ones of every other moleculer-web gateway of the cluster, recognized by their service metadata (e.g. `api.listAliases`, which lists all the routes).
+- **At most 100 open sessions by default** — New sessions over the limit get `503`. See `maxSessions`.
 - **`moleculer_list_actions` lists only the actions callable through MCP.**
 - **Actions without `rest` get annotations from their name** (e.g. `find` is read-only, `remove` destructive) instead of the POST ones.
 
@@ -30,6 +31,7 @@ All notable changes to this project will be documented in this file.
 - **Authenticated user forwarding** — The `forwardMeta` fields (default `["user"]`) of the HTTP request `ctx.meta`, e.g. the user set by the route `authenticate` method, are forwarded as `meta` to the actions and events called by the tools.
 - **`exposeGenericTools` option** — Hides `moleculer_call_action` and `moleculer_emit_event`.
 - **Idle sessions cleanup** — New `sessionTimeout` option (default 30 minutes, `false` to disable).
+- **`maxSessions` option** — Max open sessions per gateway instance (default `100`, `null` for no limit), counting the sessions being initialized: slow clients can't exceed it with concurrent requests.
 - **Bounded event store** — New `maxStoredEvents` option (default `1000`) for the SSE resumability store.
 - **DNS rebinding protection** — New `allowedOrigins` (also used for the route CORS) and `allowedHosts` options.
 - **`allowedEvents` option** — Event name patterns that `moleculer_emit_event` can emit.

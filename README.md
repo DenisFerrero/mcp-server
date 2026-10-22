@@ -93,7 +93,7 @@ This automatically generates an MCP tool:
 
 Tool names are derived from the action name by replacing dots with underscores: `service.action` → `service_action`.
 
-Internal actions (prefixed with `$`) are always excluded, and so are actions whose `visibility` is not `"published"` (the default), as in the API gateway, and the actions of the gateway service itself (e.g. the moleculer-web `api.listAliases`).
+Internal actions (prefixed with `$`) are always excluded, and so are actions whose `visibility` is not `"published"` (the default), as in the API gateway, and the actions of every moleculer-web gateway of the cluster, this one included (e.g. `api.listAliases`, which lists all the routes).
 
 Params declared with `$$root: true` are exposed as a single `$$root` argument and unwrapped before calling the action.
 
@@ -145,6 +145,10 @@ McpServerMixin({
   // Default: 30 minutes
   sessionTimeout: 30 * 60 * 1000,
 
+  // Max open sessions of this gateway instance, null for no limit (see "Sessions")
+  // Default: 100
+  maxSessions: 100,
+
   // SSE events kept in memory per session for resumability
   // Default: 1000
   maxStoredEvents: 1000,
@@ -183,6 +187,7 @@ McpServerMixin({
 | `refreshDebounceTime` | `number \| false` | `1000` | Debounce of the tools refresh on `$services.changed`, `false` to disable |
 | `forwardMeta` | `string[]` | `["user"]` | `ctx.meta` fields of the HTTP request forwarded to the called actions and events |
 | `sessionTimeout` | `number \| false` | `1800000` (30 min) | Close sessions with no requests and no open SSE stream for this time |
+| `maxSessions` | `number \| null` | `100` | Max open sessions of this gateway instance; new sessions get `503` over the limit. `null` for no limit |
 | `maxStoredEvents` | `number` | `1000` | SSE events kept in memory per session to resume interrupted streams |
 | `stateless` | `boolean` | `false` | No sessions: a new MCP server per request (multi-instance gateways) |
 | `allowedOrigins` | `string[]` | any | Allowed `Origin` headers (also used for the route CORS) |
@@ -217,7 +222,7 @@ Custom tools with a function handler receive the forwarded meta as third argumen
 
 ### What the LLM can call
 
-- Auto-discovered tools are generated only for actions that pass all the filters: not internal (`$`), `published` visibility, not `mcp: false`, not an action of the gateway itself, matching `services` and not matching `excludeActions`.
+- Auto-discovered tools are generated only for actions that pass all the filters: not internal (`$`), `published` visibility, not `mcp: false`, not an action of a moleculer-web gateway, matching `services` and not matching `excludeActions`.
 - `moleculer_call_action` and `moleculer_list_actions` apply the same filters: a filtered action returns a `not exposed via MCP` error and is not listed.
 - `moleculer_emit_event` can emit any event except the internal ones (`$services.changed`, `$node.*`, ...), unless `allowedEvents` is set: then only the matching events, internal ones included. Set `exposeGenericTools: false` if the LLM must not emit events or call actions by name.
 - `moleculer_list_nodes`/`_services`/`_events` describe the whole cluster: set `exposeBrokerTools: false` if that must stay private.
@@ -238,11 +243,13 @@ McpServerMixin({
 
 Each MCP session lives in the memory of the gateway process. Sessions are closed on `DELETE` requests or after `sessionTimeout` without activity, and keep at most `maxStoredEvents` SSE events to resume interrupted streams.
 
+`maxSessions` (default `100`) bounds the open sessions, so clients that open sessions without closing them (or an attacker doing it on purpose) can't exhaust the memory: over the limit, new sessions are rejected with `503` until a session is closed, while the open ones keep working. Each session has its own MCP server with all the tools: about 0.5 MB with 25 tools (measured), more with more tools, plus up to `maxStoredEvents` SSE events. Size it on the expected concurrent clients (an idle client keeps its session for `sessionTimeout`) and on the available memory, e.g. `maxSessions: 1000` for ~1000 users on a gateway with enough memory, or `null` for no limit when the route is authenticated and the clients are trusted.
+
 With several gateway instances behind a load balancer, either use sticky sessions or set `stateless: true`: every POST request gets a new MCP server, no session ID is issued and `GET`/`DELETE` answer `405`. In this mode server-to-client notifications (e.g. `tools/list_changed`) and stream resumability are not available.
 
 ## Custom tools
 
-Tools that don't map 1:1 to an action can be declared with the `tools` option. `input` and `output` are Zod raw shapes; `handler` is either an action name (called with the tool params) or a function `(params, broker)`.
+Tools that don't map 1:1 to an action can be declared with the `tools` option. `input` and `output` are Zod raw shapes; `handler` is either an action name (called with the tool params) or a function `(params, broker, meta)`.
 
 ```javascript
 import { z } from "zod";

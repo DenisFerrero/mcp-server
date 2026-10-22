@@ -124,6 +124,28 @@ export function isActionExposed(actionEntry: ActionEntry, options: McpServerMixi
 	return true;
 }
 
+interface ServiceEntry {
+	fullName: string;
+	metadata?: { $package?: { name?: string } };
+}
+
+/**
+ * The options with the actions of every moleculer-web gateway of the cluster (also of the
+ * other nodes) excluded: they are infrastructure, never tools (e.g. `listAliases` lists all
+ * the routes). The gateways are recognized by the package name in their service metadata.
+ */
+export function withGatewayExclusions(
+	broker: ServiceBroker,
+	options: McpServerMixinOptions
+): McpServerMixinOptions {
+	const services = broker.registry.getServiceList({}) as unknown as ServiceEntry[];
+	const patterns = services
+		.filter(service => service.metadata?.$package?.name === "moleculer-web")
+		.map(service => `${service.fullName}.*`);
+	if (patterns.length === 0) return options;
+	return { ...options, excludeActions: [...(options.excludeActions ?? []), ...patterns] };
+}
+
 /**
  * Register a MCP tool for each discovered action.
  * Tools whose name is already registered on the server are skipped with a warning.
@@ -142,9 +164,10 @@ export function registerAutoDiscoveryTools(
 	});
 
 	const prefix = options.toolNamePrefix || "";
+	const exposure = withGatewayExclusions(broker, options);
 
 	for (const actionEntry of actions) {
-		if (!isActionExposed(actionEntry, options)) continue;
+		if (!isActionExposed(actionEntry, exposure)) continue;
 
 		const actionName = actionEntry.name;
 		const actionDef = actionEntry.action || {};

@@ -21,7 +21,11 @@ import _ from "lodash";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { McpCustomTool, McpServerMixinOptions } from "./types.js";
-import { isActionExposed, registerAutoDiscoveryTools } from "./tool-generator.js";
+import {
+	isActionExposed,
+	registerAutoDiscoveryTools,
+	withGatewayExclusions
+} from "./tool-generator.js";
 import { registerCustomTools } from "./custom-tools.js";
 import { BoundedEventStore } from "./event-store.js";
 import {
@@ -75,6 +79,7 @@ const DEFAULT_OPTIONS: McpServerMixinOptions = {
 	refreshDebounceTime: 1000,
 	forwardMeta: ["user"],
 	sessionTimeout: 30 * 60 * 1000,
+	maxSessions: 100,
 	maxStoredEvents: 1000
 };
 
@@ -281,9 +286,10 @@ export function McpServerMixin(
 				async params => {
 					logger.debug("Listing Moleculer actions...", params);
 					// Same filters of `moleculer_call_action`: don't list what can't be called
+					const exposure = withGatewayExclusions(broker, options);
 					const actions = getRegistry(broker)
 						.getActionList(params)
-						.filter(entry => isActionExposed(entry, options));
+						.filter(entry => isActionExposed(entry, exposure));
 					return toTextResult(actions, options.maxResultLength);
 				}
 			);
@@ -366,7 +372,7 @@ export function McpServerMixin(
 					const entry = getRegistry(broker)
 						.getActionList({})
 						.find(a => a.name === action);
-					if (entry && !isActionExposed(entry, options)) {
+					if (entry && !isActionExposed(entry, withGatewayExclusions(broker, options))) {
 						return toErrorResult(
 							new Error(`Action '${action}' is not exposed via MCP`)
 						);
@@ -566,44 +572,73 @@ export function McpServerMixin(
 						return;
 					}
 
-					// New initialization request (no session ID or unknown session ID)
-					const session = createServer(this.broker, options);
-					const eventStore = new BoundedEventStore(options.maxStoredEvents!);
-					const transport: StreamableHTTPServerTransport =
-						new StreamableHTTPServerTransport({
-							sessionIdGenerator: () => randomUUID(),
-							eventStore, // Enable resumability
-							onsessioninitialized: (sessionId: string) => {
-								// Store the session as soon as it is initialized, before the
-								// response is sent, so the next requests of the client find it
-								this.logger.info(`Session initialized with ID: ${sessionId}`);
-								this.transports.set(sessionId, transport);
-								this.mcpSessions.set(sessionId, session);
-							}
-						});
-					session.transport = transport;
+					// New initialization request (no session ID or unknown session ID).
+					// `maxSessions` counts also the sessions being initialized right now.
+					const maxSessions = options.maxSessions;
+					if (
+						maxSessions != null &&
+						this.mcpSessions.size + this.mcpPendingSessions >= maxSessions
+					) {
+						this.logger.warn(
+							`Rejected MCP session: the limit of ${maxSessions} sessions is reached`
+						);
+						await this.sendMcpError(
+							req,
+							res,
+							503,
+							jsonRpcError(-32000, "Too many MCP sessions, retry later")
+						);
+						return;
+					}
 
-					// Remove the session when its transport is closed (DELETE, idle, shutdown)
-					session.server.server.onclose = () => {
-						const sid = transport.sessionId;
-						if (!sid) return;
-						this.mcpSessions.delete(sid);
-						if (this.transports.delete(sid)) {
-							this.logger.info(`Transport closed for session ${sid}`);
-						}
+					this.mcpPendingSessions++;
+					let pending = true;
+					const settle = () => {
+						if (pending) this.mcpPendingSessions--;
+						pending = false;
 					};
+					try {
+						const session = createServer(this.broker, options);
+						const eventStore = new BoundedEventStore(options.maxStoredEvents!);
+						const transport: StreamableHTTPServerTransport =
+							new StreamableHTTPServerTransport({
+								sessionIdGenerator: () => randomUUID(),
+								eventStore, // Enable resumability
+								onsessioninitialized: (sessionId: string) => {
+									// Store the session as soon as it is initialized, before the
+									// response is sent, so the next requests of the client find it
+									this.logger.info(`Session initialized with ID: ${sessionId}`);
+									this.transports.set(sessionId, transport);
+									this.mcpSessions.set(sessionId, session);
+									settle();
+								}
+							});
+						session.transport = transport;
 
-					// Connect the transport to the MCP server BEFORE handling the request
-					// so responses can flow back through the same transport
-					await session.server.connect(transport);
+						// Remove the session when its transport is closed (DELETE, idle, shutdown)
+						session.server.server.onclose = () => {
+							const sid = transport.sessionId;
+							if (!sid) return;
+							this.mcpSessions.delete(sid);
+							if (this.transports.delete(sid)) {
+								this.logger.info(`Transport closed for session ${sid}`);
+							}
+						};
 
-					this.attachMcpMeta(req);
-					await transport.handleRequest(req, res);
+						// Connect the transport to the MCP server BEFORE handling the request
+						// so responses can flow back through the same transport
+						await session.server.connect(transport);
 
-					// Not an initialization request (e.g. an expired session ID): the transport
-					// has rejected it and no session was created, release the server
-					if (!transport.sessionId) {
-						await session.server.close();
+						this.attachMcpMeta(req);
+						await transport.handleRequest(req, res);
+
+						// Not an initialization request (e.g. an expired session ID): the
+						// transport has rejected it and no session was created, release the server
+						if (!transport.sessionId) {
+							await session.server.close();
+						}
+					} finally {
+						settle();
 					}
 				} catch (error) {
 					this.logger.error("Error handling MCP request:", error);
@@ -801,6 +836,8 @@ export function McpServerMixin(
 		created() {
 			this.transports = new Map<string, StreamableHTTPServerTransport>();
 			this.mcpSessions = new Map<string, McpSession>();
+			// New sessions whose initialization request is being handled (see `maxSessions`)
+			this.mcpPendingSessions = 0;
 
 			// The options of this service: the gateway's own actions (e.g. the moleculer-web
 			// `listAliases`, which lists all the routes) are infrastructure, never tools
