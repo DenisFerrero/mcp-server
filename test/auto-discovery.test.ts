@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { Context, ServiceBroker } from "moleculer";
 import ApiGateway from "moleculer-web";
 import { McpServerMixin } from "../src/index.js";
+import { reservedToolNames } from "../src/tool-generator.js";
 import "../src/moleculer-types.js";
 import { createMcpClient, closeMcpClient, listTools, callTool } from "./mcp-client.js";
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
@@ -807,6 +808,16 @@ describe("Auto-discovery Integration Tests", () => {
 					action: "weather.other"
 				});
 				expect(result.content[0].text).toContain("other");
+			} finally {
+				await closeMcpClient(mcpClient);
+			}
+		});
+
+		it("should reserve exactly the names of the tools registered before the actions", async () => {
+			const mcpClient = await startWith({});
+			try {
+				const toolNames = (await listTools(mcpClient)).map((t: Tool) => t.name);
+				expect(toolNames.sort()).toEqual(reservedToolNames({}).sort());
 			} finally {
 				await closeMcpClient(mcpClient);
 			}

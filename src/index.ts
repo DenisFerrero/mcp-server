@@ -29,6 +29,7 @@ import {
 	discoverActionTools,
 	isActionExposed,
 	registerActionTools,
+	reservedToolNames,
 	withGatewayExclusions
 } from "./tool-generator.js";
 import { registerCustomTools } from "./custom-tools.js";
@@ -909,8 +910,11 @@ export function McpServerMixin(
 			 * The SDK notifies the clients with `notifications/tools/list_changed`.
 			 */
 			refreshMcpTools() {
+				const sessions = this.mcpSessions as Map<string, McpSession>;
+				// Without sessions (e.g. stateless mode) the tools are discovered on the next request
+				if (sessions.size === 0) return;
 				const actionTools = this.getMcpActionTools();
-				for (const session of (this.mcpSessions as Map<string, McpSession>).values()) {
+				for (const session of sessions.values()) {
 					for (const tool of session.autoTools) tool.remove();
 					session.autoTools = registerActionTools(
 						session.server,
@@ -927,7 +931,11 @@ export function McpServerMixin(
 			 * stateless mode creates one for each request.
 			 */
 			getMcpActionTools(): ActionToolDefinition[] {
-				return (this.mcpActionTools ??= discoverActionTools(this.broker, this.mcpOptions));
+				return (this.mcpActionTools ??= discoverActionTools(
+					this.broker,
+					this.mcpOptions,
+					reservedToolNames(this.mcpOptions)
+				));
 			},
 
 			/** Close all the open MCP sessions (their transports and SSE streams) */

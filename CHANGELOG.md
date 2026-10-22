@@ -48,7 +48,7 @@ All notable changes to this project will be documented in this file.
 
 - **Package entry points** — The 0.2.0 build output was emitted in `dist/*/src/` while `main`/`exports` pointed to `dist/*/index.js`, and the ESM build imported `package.json` without an import attribute. The version is now in `src/version.ts` and CI smoke-tests the built package.
 - **`$$root` params** — Auto-discovered tools passed `{ $$root: value }` to the action instead of `value`.
-- **Duplicated tool names** — A tool name clash (e.g. two actions with the same `mcp.name`) threw while creating the session; the duplicate is now skipped with a warning.
+- **Duplicated tool names** — A tool name clash (e.g. two actions with the same `mcp.name`) threw while creating the session; the duplicate is now skipped with a warning, logged once for each change of the services (not for every session or stateless request).
 - **Unbounded memory usage** — Sessions of clients gone away without a `DELETE` request were never released, and the SDK example `InMemoryEventStore` kept every SSE event forever.
 - **SSE resumability of the standalone stream** — The SDK example store could not resume the `_GET_stream`, because it extracted the stream ID splitting the event ID on `_`.
 - **Custom tools without `input`** — The handler received the SDK `extra` object in place of the params.

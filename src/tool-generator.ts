@@ -149,6 +149,26 @@ export function withGatewayExclusions(
 	return { ...options, excludeActions: [...(options.excludeActions ?? []), ...patterns] };
 }
 
+/** Names of the broker tools (`exposeBrokerTools`) */
+export const BROKER_TOOL_NAMES = [
+	"moleculer_list_nodes",
+	"moleculer_list_services",
+	"moleculer_list_actions",
+	"moleculer_list_events"
+];
+
+/** Names of the generic tools (`exposeGenericTools`) */
+export const GENERIC_TOOL_NAMES = ["moleculer_call_action", "moleculer_emit_event"];
+
+/** Names of the tools registered before the auto-discovered ones (see `createServer`) */
+export function reservedToolNames(options: McpServerMixinOptions): string[] {
+	return [
+		...(options.exposeBrokerTools !== false ? BROKER_TOOL_NAMES : []),
+		...(options.exposeGenericTools !== false ? GENERIC_TOOL_NAMES : []),
+		...(options.tools ?? []).map(tool => tool.name)
+	];
+}
+
 /** A tool generated from an action: everything but the handler, which needs the server options */
 export interface ActionToolDefinition {
 	toolName: string;
@@ -165,9 +185,13 @@ export interface ActionToolDefinition {
  */
 export function discoverActionTools(
 	broker: ServiceBroker,
-	options: McpServerMixinOptions
+	options: McpServerMixinOptions,
+	reservedNames: string[] = []
 ): ActionToolDefinition[] {
+	const logger = broker.getLogger("MCP-AutoDiscovery");
 	const definitions: ActionToolDefinition[] = [];
+	// Checked here, once for each registry change, instead of on every registration
+	const names = new Set(reservedNames);
 	const actions: ActionEntry[] = broker.registry.getActionList({
 		skipInternal: true,
 		withEndpoints: false
@@ -188,6 +212,12 @@ export function discoverActionTools(
 		// Tool name
 		// Only letters, digits, "_" and "-" are valid in tool names (e.g. `v2.users.get` → `v2_users_get`)
 		const toolName = mcpMeta.name || prefix + actionName.replace(/[^a-zA-Z0-9_-]/g, "_");
+		if (names.has(toolName)) {
+			// e.g. two actions with the same `mcp.name`, or a name clashing with a broker tool
+			logger.warn(`Skipping tool '${toolName}' for action ${actionName}: name already used`);
+			continue;
+		}
+		names.add(toolName);
 
 		// Description
 		const description =
@@ -252,7 +282,7 @@ export function registerActionTools(
 			});
 			registered.push(tool);
 		} catch (err) {
-			// e.g. two actions with the same `mcp.name`, or a name clashing with a broker tool
+			// The duplicated names are skipped by `discoverActionTools`: not expected
 			logger.warn(`Skipping tool '${toolName}' for action ${actionName}:`, err);
 			continue;
 		}
@@ -273,5 +303,10 @@ export function registerAutoDiscoveryTools(
 	broker: ServiceBroker,
 	options: McpServerMixinOptions
 ): RegisteredTool[] {
-	return registerActionTools(server, broker, options, discoverActionTools(broker, options));
+	return registerActionTools(
+		server,
+		broker,
+		options,
+		discoverActionTools(broker, options, reservedToolNames(options))
+	);
 }

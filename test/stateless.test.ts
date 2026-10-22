@@ -136,6 +136,52 @@ describe("Stateless mode", () => {
 			expect(vi.mocked(convertActionParamsToZod).mock.calls.length).toBe(conversions);
 		});
 
+		it("should not convert the schemas on a services change without sessions", async () => {
+			await start();
+			const conversions = vi.mocked(convertActionParamsToZod).mock.calls.length;
+
+			broker.createService({ name: "late", actions: { ping: { handler: () => "pong" } } });
+			await broker.waitForServices("late");
+			// Longer than the default refresh debounce (1000 ms)
+			await new Promise(resolve => setTimeout(resolve, 1200));
+
+			expect(vi.mocked(convertActionParamsToZod).mock.calls.length).toBe(conversions);
+			expect(await toolNames()).toContain("late_ping");
+		});
+
+		it("should warn about a duplicated tool name once, not on every request", async () => {
+			broker = new ServiceBroker({ logger: false });
+			const warn = vi.fn();
+			const getLogger = broker.getLogger.bind(broker);
+			vi.spyOn(broker, "getLogger").mockImplementation((...args) => {
+				const logger = getLogger(...args);
+				logger.warn = warn;
+				return logger;
+			});
+			apiService = broker.createService({
+				name: "api",
+				mixins: [ApiGateway, McpServerMixin({ stateless: true })],
+				settings: { port: 0, routes: [] }
+			});
+			broker.createService({
+				name: "dup",
+				actions: {
+					first: { mcp: { name: "same_name" }, handler: () => "first" },
+					second: { mcp: { name: "same_name" }, handler: () => "second" }
+				}
+			});
+			await broker.start();
+			url = `http://localhost:${((apiService.server as Server).address() as AddressInfo).port}/mcp`;
+
+			for (let i = 0; i < 3; i++) {
+				expect((await toolNames()).filter(name => name === "same_name")).toHaveLength(1);
+			}
+			const skipped = warn.mock.calls.filter(([message]) =>
+				String(message).includes("Skipping tool 'same_name'")
+			);
+			expect(skipped).toHaveLength(1);
+		});
+
 		it("should show the actions of the services started or stopped later", async () => {
 			await start();
 			expect(await toolNames()).not.toContain("late_ping");
