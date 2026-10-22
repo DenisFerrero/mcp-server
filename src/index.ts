@@ -23,6 +23,7 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { z } from "zod";
 import type { McpCustomTool, McpServerMixinOptions } from "./types.js";
+import type { RequestContextOptions } from "./utils.js";
 import {
 	isActionExposed,
 	registerAutoDiscoveryTools,
@@ -33,6 +34,8 @@ import { BoundedEventStore } from "./event-store.js";
 import {
 	getCallOptions,
 	getForwardedMeta,
+	getRequestContext,
+	MCP_CONTEXT_KEY,
 	MCP_META_KEY,
 	registerTool,
 	toErrorResult,
@@ -511,7 +514,7 @@ export function McpServerMixin(
 
 					const eventParams = parseJsonParams(params.jsonParams);
 					try {
-						const opts = { meta: getForwardedMeta(extra) };
+						const opts = { ...getRequestContext(extra), meta: getForwardedMeta(extra) };
 						if (params.broadcast) {
 							await broker.broadcast(event, eventParams, opts);
 						} else {
@@ -637,22 +640,35 @@ export function McpServerMixin(
 
 			/**
 			 * Make the forwarded `ctx.meta` fields of the HTTP request (e.g. the user set by the
-			 * route `authenticate` method) available to the tool handlers, through the
-			 * `authInfo` that the MCP SDK passes in the handler `extra` argument.
+			 * route `authenticate` method) and its context (request ID, tracing span) available
+			 * to the tool handlers, through the `authInfo` that the MCP SDK passes in the
+			 * handler `extra` argument.
 			 */
 			attachMcpMeta(req: McpRequest) {
 				const options: McpServerMixinOptions = this.mcpOptions;
+				const ctx = req.$ctx;
+				if (!ctx) return;
 				const meta = _.pick(
-					(req.$ctx?.meta as Record<string, unknown>) ?? {},
+					(ctx.meta as Record<string, unknown>) ?? {},
 					options.forwardMeta ?? []
 				);
-				if (_.isEmpty(meta)) return;
+				const context: RequestContextOptions = {
+					requestID: ctx.requestID ?? undefined,
+					// The HTTP request context is the parent of the calls (`parentCtx` would
+					// also copy its whole `meta`, bypassing `forwardMeta`)
+					parentSpan: {
+						id: ctx.span?.id ?? ctx.id,
+						traceID: ctx.requestID ?? ctx.id,
+						sampled: Boolean(ctx.tracing)
+					},
+					caller: ctx.service?.fullName
+				};
 				req.auth = {
 					token: "",
 					clientId: "",
 					scopes: [],
 					...req.auth,
-					extra: { ...req.auth?.extra, [MCP_META_KEY]: meta }
+					extra: { ...req.auth?.extra, [MCP_META_KEY]: meta, [MCP_CONTEXT_KEY]: context }
 				};
 			},
 

@@ -26,13 +26,16 @@ export interface McpCustomTool {
 	/**
 	 * Action name to call with the tool params, or a function returning the result.
 	 * `meta` contains the fields forwarded from the HTTP request (see `forwardMeta`).
+	 * `callOptions` are the options to pass to `broker.call`: the forwarded meta, the
+	 * configured `callOptions` and the context of the HTTP request (request ID, tracing).
 	 */
 	handler:
 		| string
 		| ((
 				params: Record<string, unknown>,
 				broker: ServiceBroker,
-				meta: Record<string, unknown>
+				meta: Record<string, unknown>,
+				callOptions: CallingOptions
 		  ) => unknown);
 }
 

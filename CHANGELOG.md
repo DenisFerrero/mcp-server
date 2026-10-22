@@ -34,6 +34,7 @@ All notable changes to this project will be documented in this file.
 - **`exposeGenericTools` option** — Hides `moleculer_call_action` and `moleculer_emit_event`.
 - **Idle sessions cleanup** — New `sessionTimeout` option (default 30 minutes, `false` to disable).
 - **`maxSessions` option** — Max open sessions per gateway instance (default `100`, `null` for no limit), counting the sessions being initialized: slow clients can't exceed it with concurrent requests.
+- **Request ID and tracing** — The actions and events called by the tools get the `requestID` of the HTTP request, its context as parent span and the gateway as `caller`, without inheriting its `ctx.meta`. Function handlers of custom tools get the ready `callOptions` as fourth argument.
 - **Bounded event store** — New `maxStoredEvents` option (default `1000`) for the SSE resumability store.
 - **DNS rebinding protection** — New `allowedOrigins` (also used for the route CORS) and `allowedHosts` options.
 - **`allowedEvents` option** — Event name patterns that `moleculer_emit_event` can emit.

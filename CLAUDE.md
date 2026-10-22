@@ -27,6 +27,7 @@ test/
   call-options.test.ts  # callOptions and maxResultLength
   stateless.test.ts     # Stateless mode
   annotations.test.ts   # Annotations from REST method and action names
+  request-context.test.ts # requestID, parent span and caller of the tool calls
   options.test.ts       # Mixin options, routeOptions merge, protocol errors
   mcp-client.ts         # Test MCP client helper
   setup.ts              # Vitest setup: random ports never get a port refused by `fetch` ("bad port")

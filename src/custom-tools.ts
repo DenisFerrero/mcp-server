@@ -24,12 +24,13 @@ export function registerCustomTools(
 	for (const def of options.tools ?? []) {
 		const handler: ToolHandler = async (params, extra) => {
 			const meta = getForwardedMeta(extra);
+			const callOptions = getCallOptions(options, extra);
 			try {
 				let result: unknown;
 				if (typeof def.handler === "function") {
-					result = await def.handler(params, broker, meta);
+					result = await def.handler(params, broker, meta, callOptions);
 				} else if (typeof def.handler === "string") {
-					result = await broker.call(def.handler, params, getCallOptions(options, extra));
+					result = await broker.call(def.handler, params, callOptions);
 				} else {
 					throw new Error(`Invalid handler for tool '${def.name}'`);
 				}

@@ -429,7 +429,7 @@ describe("MCP Server Integration Tests", () => {
 					result: 42,
 					operation: "test"
 				},
-				{ meta: {} }
+				expect.objectContaining({ meta: {} })
 			);
 			expect(emitSpy).toHaveBeenCalledTimes(1);
 
@@ -479,7 +479,7 @@ describe("MCP Server Integration Tests", () => {
 					result: 100,
 					operation: "broadcast test"
 				},
-				{ meta: {} }
+				expect.objectContaining({ meta: {} })
 			);
 			expect(broadcastSpy).toHaveBeenCalledTimes(1);
 

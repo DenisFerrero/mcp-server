@@ -46,16 +46,35 @@ export function getForwardedMeta(extra?: { authInfo?: AuthInfo }): Record<string
 	return (extra?.authInfo?.extra?.[MCP_META_KEY] as Record<string, unknown>) ?? {};
 }
 
+/** Key of `AuthInfo.extra` where the mixin stores the context of the HTTP request */
+export const MCP_CONTEXT_KEY = "moleculerContext";
+
 /**
- * Calling options for the actions called by a tool: the configured `callOptions`
- * (e.g. `timeout`) and the meta forwarded from the HTTP request.
+ * Calling options that link the actions and events of a tool to the HTTP request: the same
+ * `requestID` (logs), the request context as parent (tracing) and the gateway as `caller`.
+ * The request `ctx.meta` is not inherited: only the `forwardMeta` fields are forwarded.
+ */
+export type RequestContextOptions = Pick<CallingOptions, "requestID" | "parentSpan" | "caller">;
+
+/** Get the context of the HTTP request from the `extra` argument of a MCP tool handler */
+export function getRequestContext(extra?: { authInfo?: AuthInfo }): RequestContextOptions {
+	return (extra?.authInfo?.extra?.[MCP_CONTEXT_KEY] as RequestContextOptions) ?? {};
+}
+
+/**
+ * Calling options for the actions called by a tool: the context of the HTTP request, the
+ * configured `callOptions` (e.g. `timeout`) and the meta forwarded from the HTTP request.
  */
 export function getCallOptions(
 	options: McpServerMixinOptions,
 	extra?: { authInfo?: AuthInfo }
 ): CallingOptions {
 	const callOptions = options.callOptions ?? {};
-	return { ...callOptions, meta: { ...callOptions.meta, ...getForwardedMeta(extra) } };
+	return {
+		...getRequestContext(extra),
+		...callOptions,
+		meta: { ...callOptions.meta, ...getForwardedMeta(extra) }
+	};
 }
 
 /**

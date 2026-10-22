@@ -221,7 +221,11 @@ export default {
 };
 ```
 
-Custom tools with a function handler receive the forwarded meta as third argument: `handler(params, broker, meta)`.
+Custom tools with a function handler receive the forwarded meta as third argument and the options for `broker.call` as fourth: `handler(params, broker, meta, callOptions)`.
+
+### Request ID and tracing
+
+The actions and events called by the tools are linked to the HTTP request: they get its `requestID` (e.g. from the `X-Request-ID` header, so the logs of a tool call can be correlated with the request), the request context as parent (with tracing enabled, the calls are child spans of the request) and the gateway as `ctx.caller`. The request `ctx.meta` is not inherited: only the `forwardMeta` fields are forwarded. In function handlers of custom tools, pass `callOptions` to `broker.call` to keep the link.
 
 ### What the LLM can call
 
@@ -254,7 +258,7 @@ With several gateway instances behind a load balancer, either use sticky session
 
 ## Custom tools
 
-Tools that don't map 1:1 to an action can be declared with the `tools` option. `input` and `output` are Zod raw shapes; `handler` is either an action name (called with the tool params) or a function `(params, broker, meta)`.
+Tools that don't map 1:1 to an action can be declared with the `tools` option. `input` and `output` are Zod raw shapes; `handler` is either an action name (called with the tool params) or a function `(params, broker, meta, callOptions)`.
 
 ```javascript
 import { z } from "zod";
