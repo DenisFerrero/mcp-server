@@ -212,15 +212,71 @@ describe("Options and route", () => {
 			expect(apiService.mcpSessions.size).toBe(0);
 		});
 
-		it("should reply with a valid JSON-RPC error (id: null) to unknown sessions", async () => {
+		const SESSION_NOT_FOUND = {
+			jsonrpc: "2.0",
+			error: { code: -32001, message: "Session not found" },
+			id: null
+		};
+		const unknown = { "mcp-session-id": "unknown" };
+
+		it("should reply 404 to the requests of unknown sessions, as the MCP spec requires", async () => {
 			await start();
-			const res = await request("DELETE", { "mcp-session-id": "unknown" });
-			expect(res.status).toBe(400);
-			expect(JSON.parse(res.body)).toEqual({
-				jsonrpc: "2.0",
-				error: { code: -32000, message: "Bad Request: No valid session ID provided" },
-				id: null
-			});
+			for (const res of [
+				await request("POST", unknown, LIST_TOOLS),
+				await request("GET", unknown),
+				await request("DELETE", unknown)
+			]) {
+				expect(res.status).toBe(404);
+				expect(JSON.parse(res.body)).toEqual(SESSION_NOT_FOUND);
+			}
+			expect(apiService.mcpSessions.size).toBe(0);
+		});
+
+		it("should reply 400 to GET and DELETE requests without session ID", async () => {
+			await start();
+			for (const method of ["GET", "DELETE"]) {
+				const res = await request(method, {});
+				expect(res.status).toBe(400);
+				expect(JSON.parse(res.body).id).toBeNull();
+			}
+		});
+
+		it("should start a new session for an initialization request with an unknown ID", async () => {
+			await start();
+			const res = await request("POST", unknown, INITIALIZE);
+			expect(res.status).toBe(200);
+			const sessionId = res.headers["mcp-session-id"] as string;
+			expect(sessionId).toBeDefined();
+			expect(sessionId).not.toBe("unknown");
+			expect(apiService.mcpSessions.has(sessionId)).toBe(true);
+		});
+
+		it("should resume with a new session after the old one has been closed", async () => {
+			await start();
+			const mcpClient = await connect();
+			try {
+				await apiService.closeMcpSessions();
+				// The SDK client gets the 404, as a spec compliant client starts a new session
+				await expect(listTools(mcpClient)).rejects.toThrow(/404|Session not found/);
+			} finally {
+				await closeMcpClient(mcpClient, { terminate: false });
+			}
+			const fresh = await connect();
+			try {
+				expect((await listTools(fresh)).length).toBeGreaterThan(0);
+			} finally {
+				await closeMcpClient(fresh);
+			}
+		});
+
+		it("should reject invalid or too large bodies of unknown sessions", async () => {
+			await start();
+			const invalid = await request("POST", unknown, "{not json");
+			expect(invalid.status).toBe(400);
+			expect(JSON.parse(invalid.body).error.code).toBe(-32700);
+
+			const large = await request("POST", unknown, JSON.stringify({ x: "a".repeat(5e6) }));
+			expect(large.status).toBe(413);
 		});
 	});
 
@@ -334,6 +390,90 @@ describe("Options and route", () => {
 				await expectGatewayHidden("www");
 			} finally {
 				await remote.stop();
+			}
+		});
+	});
+
+	describe("Broker tools", () => {
+		it("should work with every combination of their flags", async () => {
+			await start();
+			const flags: Record<string, string[]> = {
+				moleculer_list_nodes: ["onlyAvailable", "withServices"],
+				moleculer_list_services: [
+					"onlyLocal",
+					"onlyAvailable",
+					"skipInternal",
+					"withActions",
+					"withEvents",
+					"grouping"
+				],
+				moleculer_list_actions: [
+					"onlyLocal",
+					"onlyAvailable",
+					"skipInternal",
+					"withEndpoints"
+				],
+				moleculer_list_events: [
+					"onlyLocal",
+					"onlyAvailable",
+					"skipInternal",
+					"withEndpoints"
+				]
+			};
+			const mcpClient = await connect();
+			const failures: string[] = [];
+			try {
+				for (const [tool, names] of Object.entries(flags)) {
+					for (let mask = 0; mask < 1 << names.length; mask++) {
+						const args = Object.fromEntries(
+							names.map((name, i) => [name, Boolean(mask & (1 << i))])
+						);
+						const result = await callTool(mcpClient, tool, args);
+						if (result.isError) failures.push(`${tool} ${JSON.stringify(args)}`);
+					}
+				}
+			} finally {
+				await closeMcpClient(mcpClient);
+			}
+			// e.g. `withServices` returned the circular registry items
+			expect(failures).toEqual([]);
+		});
+
+		it("should never send the service settings and the node config to the LLM", async () => {
+			broker = new ServiceBroker({ logger: false });
+			apiService = broker.createService({
+				name: "api",
+				mixins: [ApiGateway, McpServerMixin()],
+				settings: { port: 0, routes: [] }
+			});
+			broker.createService({
+				name: "db",
+				settings: { mongoUri: "mongodb://admin:S3cret@db:27017" },
+				actions: { find: () => [] }
+			});
+			await broker.start();
+			port = (apiService.server.address() as AddressInfo).port;
+
+			const mcpClient = await connect();
+			try {
+				const services = await callTool(mcpClient, "moleculer_list_services", {});
+				const nodes = await callTool(mcpClient, "moleculer_list_nodes", {
+					withServices: true
+				});
+				for (const result of [services, nodes]) {
+					expect(result.isError, result.content[0].text).toBeFalsy();
+					expect(result.content[0].text).not.toContain("S3cret");
+					expect(result.content[0].text).not.toContain('"settings"');
+				}
+				expect(nodes.content[0].text).not.toContain('"config"');
+				// The rest of the information is still there
+				const db = JSON.parse(services.content[0].text).find(
+					(s: { name: string }) => s.name === "db"
+				);
+				expect(db).toMatchObject({ name: "db", available: true });
+				expect(JSON.parse(nodes.content[0].text)[0].services.length).toBeGreaterThan(0);
+			} finally {
+				await closeMcpClient(mcpClient);
 			}
 		});
 	});

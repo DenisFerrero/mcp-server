@@ -71,7 +71,7 @@ npm run inspect   # MCP Inspector UI: connect it to http://localhost:3300/mcp (S
 - `tools` — `McpCustomTool[]` (default: `[]`) — manually declared tools
 - `refreshDebounceTime` — `number | false` (default: `1000`) — debounce of the tools refresh on `$services.changed`
 - `forwardMeta` — `string[]` (default: `["user"]`) — HTTP request `ctx.meta` fields forwarded to actions/events
-- `sessionTimeout` — `number | false` (default: 30 min) — close idle sessions
+- `sessionTimeout` — `number | false` (default: 30 min) — close idle sessions (`false`/`0` disable)
 - `maxSessions` — `number | null` (default: `100`) — max open sessions, `503` over the limit, `null` unlimited
 - `maxStoredEvents` — `number` (default: `1000`) — SSE events kept per session
 - `stateless` — `boolean` (default: `false`) — no sessions, a new MCP server per request

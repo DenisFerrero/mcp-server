@@ -11,6 +11,8 @@ All notable changes to this project will be documented in this file.
 - **Tool registration logs are at `debug` level** (they were at `info`, one line per tool for every session).
 - **`routeOptions` is typed as `Partial<ApiRouteSchema>`** and merged with the MCP route options instead of deep-merged: the MCP aliases can't be replaced, the CORS methods and headers needed by MCP are added to the user ones, and `bodyParsers.json` is always `false`.
 - **Packaging** — The type declarations are emitted next to each build (`dist/cjs`, `dist/esm`): CommonJS projects with `moduleResolution: node16`/`nodenext` got the ESM declarations. `dist/types` doesn't exist anymore.
+- **Requests with an unknown session ID get `404`** instead of `400`, as the MCP specification requires, so the clients start a new session (e.g. after `sessionTimeout` or a gateway restart). Initialization requests with an unknown session ID still open a new session. `GET`/`DELETE` without session ID still get `400`.
+- **`moleculer_list_services` and `moleculer_list_nodes` don't return the service `settings`** (they can contain credentials not listed in `$secureSettings`) **and the node `config`**. With `withServices`, the nodes have a summary of their services.
 - **`moleculer-web` is a peer dependency** (`^0.10.0 || ^0.11.0`). The mixin already needed it to work, and the published type declarations import its types.
 - **Only `published` actions are auto-discovered.** Actions with `visibility: "public" | "protected" | "private"` are no longer exposed as MCP tools, consistently with the API gateway.
 - **Tool errors are flagged with `isError: true`** and no longer include the stack trace. The payload now contains `name`, `message`, `code`, `type`, `data`.
@@ -57,6 +59,9 @@ All notable changes to this project will be documented in this file.
 - **Protocol errors** — JSON-RPC errors had no `id` (now `null`), errors of `GET` requests were not handled, and a non-initialization request without a valid session left a connected server behind.
 - **Tool list notifications** — Registering or removing many tools (e.g. on a refresh) sends one `tools/list_changed` notification instead of one per tool.
 - **MCP client example** — It passed `parameters` instead of `arguments` and listed resources, which the server doesn't support.
+- **`moleculer_list_nodes` with `withServices: true` always failed** — The registry returns its internal service items, which are circular and can't be serialized.
+- **`sessionTimeout: 0`** closed every session at once and ran the idle check continuously: it now disables the timeout, as `false`.
+- **Authentication example** — It returned `null` for a missing token, which lets the request go on as anonymous.
 - **Cross-platform npm scripts** — `dev`, `inspect` and `build` only worked on Windows or only on POSIX shells.
 
 ## 0.2.0 (2026-03-28)

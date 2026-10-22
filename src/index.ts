@@ -9,6 +9,7 @@ import { VERSION } from "./version.js";
 import { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import Moleculer, { ActionSchema, ServiceBroker, ServiceSchema } from "moleculer";
 import type {
 	ApiRouteSchema,
@@ -19,6 +20,7 @@ import type {
 } from "moleculer-web";
 import _ from "lodash";
 import { randomUUID } from "node:crypto";
+import type { IncomingMessage } from "node:http";
 import { z } from "zod";
 import type { McpCustomTool, McpServerMixinOptions } from "./types.js";
 import {
@@ -123,6 +125,73 @@ function jsonRpcError(code: number, message: string) {
 	return { jsonrpc: "2.0", error: { code, message }, id: null };
 }
 
+/** Max size of a request body read by the mixin: the default of the SDK transport */
+const MAX_BODY_SIZE = 4 * 1024 * 1024;
+
+type BodyResult = { body: unknown } | { status: number; error: ReturnType<typeof jsonRpcError> };
+
+/** Read and parse the JSON body of a request, up to `MAX_BODY_SIZE` bytes */
+async function readJsonBody(req: IncomingMessage): Promise<BodyResult> {
+	const tooLarge = { status: 413, error: jsonRpcError(-32000, "Request body too large") };
+	if (Number(req.headers["content-length"]) > MAX_BODY_SIZE) return tooLarge;
+
+	const chunks: Buffer[] = [];
+	let size = 0;
+	for await (const chunk of req as AsyncIterable<Buffer>) {
+		size += chunk.length;
+		// Keep reading (and discarding) the body, so the response can still be sent
+		if (size <= MAX_BODY_SIZE) chunks.push(chunk);
+	}
+	if (size > MAX_BODY_SIZE) return tooLarge;
+
+	try {
+		return { body: JSON.parse(Buffer.concat(chunks).toString("utf8")) };
+	} catch {
+		return { status: 400, error: jsonRpcError(-32700, "Parse error: Invalid JSON") };
+	}
+}
+
+/** Whether a JSON-RPC message (or batch) is an initialization request */
+function isInitialization(body: unknown): boolean {
+	return Array.isArray(body) ? body.some(isInitializeRequest) : isInitializeRequest(body);
+}
+
+type Entry = Record<string, unknown>;
+
+/**
+ * Service settings can contain credentials (e.g. a database URI) when they are not listed in
+ * `$secureSettings`, and the node `config` contains the broker options: the broker tools never
+ * send them to the LLM.
+ */
+function omitServiceSettings(services: unknown): unknown {
+	return Array.isArray(services)
+		? services.map((service: Entry) => _.omit(service, "settings"))
+		: services;
+}
+
+/**
+ * The node list without the node `config`. With `withServices` the registry returns its
+ * internal service items, which reference their node and endpoints (circular, so they can't
+ * be serialized): they are summarized, without the settings.
+ */
+function toNodeList(nodes: unknown): unknown {
+	if (!Array.isArray(nodes)) return nodes;
+	return nodes.map((node: Entry) => {
+		const result: Entry = _.omit(node, "config");
+		if (Array.isArray(result.services)) {
+			result.services = result.services.map((service: Entry) => ({
+				name: service.name,
+				fullName: service.fullName,
+				version: service.version,
+				metadata: service.metadata,
+				actions: Object.keys((service.actions as Entry) ?? {}),
+				events: Object.keys((service.events as Entry) ?? {})
+			}));
+		}
+		return result;
+	});
+}
+
 function parseJsonParams(jsonParams: unknown): unknown {
 	if (!jsonParams) return {};
 	try {
@@ -190,7 +259,7 @@ export function McpServerMixin(
 				},
 				async params => {
 					logger.debug("Listing Moleculer nodes...", params);
-					const nodes = getRegistry(broker).getNodeList(params);
+					const nodes = toNodeList(getRegistry(broker).getNodeList(params));
 					return toTextResult(nodes, options.maxResultLength);
 				}
 			);
@@ -242,7 +311,9 @@ export function McpServerMixin(
 				},
 				async params => {
 					logger.debug("Listing Moleculer services...", params);
-					const services = getRegistry(broker).getServiceList(params);
+					const services = omitServiceSettings(
+						getRegistry(broker).getServiceList(params)
+					);
 					return toTextResult(services, options.maxResultLength);
 				}
 			);
@@ -521,6 +592,37 @@ export function McpServerMixin(
 				return true;
 			},
 
+			/**
+			 * Check the session of a GET or DELETE request: 400 without session ID, 404 (as the MCP
+			 * specification requires, so the client starts a new session) for an unknown one.
+			 * @returns true if the session is valid
+			 */
+			async rejectInvalidMcpSession(
+				req: McpRequest,
+				res: GatewayResponse,
+				sessionId: string | undefined
+			): Promise<boolean> {
+				if (!sessionId) {
+					await this.sendMcpError(
+						req,
+						res,
+						400,
+						jsonRpcError(-32000, "Bad Request: Mcp-Session-Id header is required")
+					);
+					return false;
+				}
+				if (!this.transports.has(sessionId)) {
+					await this.sendMcpError(
+						req,
+						res,
+						404,
+						jsonRpcError(-32001, "Session not found")
+					);
+					return false;
+				}
+				return true;
+			},
+
 			/** Send a JSON-RPC error response, unless the response has already been started */
 			async sendMcpError(
 				req: McpRequest,
@@ -572,8 +674,30 @@ export function McpServerMixin(
 						return;
 					}
 
-					// New initialization request (no session ID or unknown session ID).
-					// `maxSessions` counts also the sessions being initialized right now.
+					// Unknown session ID (expired, closed, or of a restarted gateway): the MCP
+					// specification requires a 404, so the client starts a new session.
+					// Initialization requests are accepted, for clients that send their old ID.
+					let parsedBody: unknown;
+					if (sessionId) {
+						const result = await readJsonBody(req);
+						if ("error" in result) {
+							await this.sendMcpError(req, res, result.status, result.error);
+							return;
+						}
+						if (!isInitialization(result.body)) {
+							await this.sendMcpError(
+								req,
+								res,
+								404,
+								jsonRpcError(-32001, "Session not found")
+							);
+							return;
+						}
+						parsedBody = result.body;
+					}
+
+					// New initialization request. `maxSessions` counts also the sessions being
+					// initialized right now.
 					const maxSessions = options.maxSessions;
 					if (
 						maxSessions != null &&
@@ -630,7 +754,7 @@ export function McpServerMixin(
 						await session.server.connect(transport);
 
 						this.attachMcpMeta(req);
-						await transport.handleRequest(req, res);
+						await transport.handleRequest(req, res, parsedBody);
 
 						// Not an initialization request (e.g. an expired session ID): the
 						// transport has rejected it and no session was created, release the server
@@ -657,15 +781,7 @@ export function McpServerMixin(
 				if (await this.rejectInvalidMcpHeaders(req, res)) return;
 				if (options.stateless) return this.rejectStatelessMcpMethod(req, res);
 				const sessionId = req.headers["mcp-session-id"] as string | undefined;
-				if (!sessionId || !this.transports.has(sessionId)) {
-					await this.sendMcpError(
-						req,
-						res,
-						400,
-						jsonRpcError(-32000, "Bad Request: No valid session ID provided")
-					);
-					return;
-				}
+				if (!(await this.rejectInvalidMcpSession(req, res, sessionId))) return;
 
 				// Last-Event-ID header: the client resumes the stream
 				const lastEventId = req.headers["last-event-id"] as string | undefined;
@@ -696,15 +812,7 @@ export function McpServerMixin(
 				if (await this.rejectInvalidMcpHeaders(req, res)) return;
 				if (options.stateless) return this.rejectStatelessMcpMethod(req, res);
 				const sessionId = req.headers["mcp-session-id"] as string | undefined;
-				if (!sessionId || !this.transports.has(sessionId)) {
-					await this.sendMcpError(
-						req,
-						res,
-						400,
-						jsonRpcError(-32000, "Bad Request: No valid session ID provided")
-					);
-					return;
-				}
+				if (!(await this.rejectInvalidMcpSession(req, res, sessionId))) return;
 
 				this.logger.info(`Received session termination request for session ${sessionId}`);
 
@@ -880,8 +988,9 @@ export function McpServerMixin(
 
 		started() {
 			const options: McpServerMixinOptions = this.mcpOptions;
-			if (options.sessionTimeout !== false) {
-				const timeout = options.sessionTimeout!;
+			const timeout = options.sessionTimeout;
+			// `false` and 0 disable the timeout (0 would close every session at once)
+			if (typeof timeout === "number" && timeout > 0) {
 				this.mcpIdleTimer = setInterval(
 					() => this.closeIdleMcpSessions(),
 					Math.min(timeout, 60 * 1000)

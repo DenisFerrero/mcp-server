@@ -28,7 +28,7 @@ Expose your Moleculer microservices to AI assistants (Claude, GPT, etc.) via the
 npm i @moleculer/mcp-server moleculer-web
 ```
 
-Both Moleculer 0.14 and 0.15 are supported, with the matching moleculer-web version:
+Requires Node.js 22.12 or newer. Both Moleculer 0.14 and 0.15 are supported, with the matching moleculer-web version:
 
 | Moleculer | moleculer-web |
 |---|---|
@@ -186,7 +186,7 @@ McpServerMixin({
 | `tools` | `McpCustomTool[]` | `[]` | Manually declared tools |
 | `refreshDebounceTime` | `number \| false` | `1000` | Debounce of the tools refresh on `$services.changed`, `false` to disable |
 | `forwardMeta` | `string[]` | `["user"]` | `ctx.meta` fields of the HTTP request forwarded to the called actions and events |
-| `sessionTimeout` | `number \| false` | `1800000` (30 min) | Close sessions with no requests and no open SSE stream for this time |
+| `sessionTimeout` | `number \| false` | `1800000` (30 min) | Close sessions with no requests and no open SSE stream for this time. `false` or `0` to disable |
 | `maxSessions` | `number \| null` | `100` | Max open sessions of this gateway instance; new sessions get `503` over the limit. `null` for no limit |
 | `maxStoredEvents` | `number` | `1000` | SSE events kept in memory per session to resume interrupted streams |
 | `stateless` | `boolean` | `false` | No sessions: a new MCP server per request (multi-instance gateways) |
@@ -211,8 +211,11 @@ export default {
   methods: {
     async authenticate(ctx, route, req) {
       const token = req.headers["authorization"]?.replace("Bearer ", "");
-      if (!token) return null;
-      return await ctx.call("users.resolveToken", { token }); // → ctx.meta.user
+      // Returning null lets the request go on as anonymous: throw to reject it
+      if (!token) throw new ApiGateway.Errors.UnAuthorizedError(ApiGateway.Errors.ERR_NO_TOKEN);
+      const user = await ctx.call("users.resolveToken", { token });
+      if (!user) throw new ApiGateway.Errors.UnAuthorizedError(ApiGateway.Errors.ERR_INVALID_TOKEN);
+      return user; // → ctx.meta.user
     }
   }
 };
@@ -244,6 +247,8 @@ McpServerMixin({
 Each MCP session lives in the memory of the gateway process. Sessions are closed on `DELETE` requests or after `sessionTimeout` without activity, and keep at most `maxStoredEvents` SSE events to resume interrupted streams.
 
 `maxSessions` (default `100`) bounds the open sessions, so clients that open sessions without closing them (or an attacker doing it on purpose) can't exhaust the memory: over the limit, new sessions are rejected with `503` until a session is closed, while the open ones keep working. Each session has its own MCP server with all the tools: about 0.5 MB with 25 tools (measured), more with more tools, plus up to `maxStoredEvents` SSE events. Size it on the expected concurrent clients (an idle client keeps its session for `sessionTimeout`) and on the available memory, e.g. `maxSessions: 1000` for ~1000 users on a gateway with enough memory, or `null` for no limit when the route is authenticated and the clients are trusted.
+
+Requests with an unknown session ID (closed, expired or of a restarted gateway) get `404 Session not found`, as the MCP specification requires: the clients then start a new session.
 
 With several gateway instances behind a load balancer, either use sticky sessions or set `stateless: true`: every POST request gets a new MCP server, no session ID is issued and `GET`/`DELETE` answer `405`. In this mode server-to-client notifications (e.g. `tools/list_changed`) and stream resumability are not available.
 
@@ -419,10 +424,12 @@ When `exposeBrokerTools` is `true` (default), the following broker-level tools a
 
 | Tool | Description |
 |---|---|
-| `moleculer_list_nodes` | List all Moleculer nodes in the cluster |
+| `moleculer_list_nodes` | List all Moleculer nodes in the cluster (with `withServices`, a summary of their services: name, version, metadata, action and event names) |
 | `moleculer_list_services` | List all registered services |
 | `moleculer_list_actions` | List all available actions |
 | `moleculer_list_events` | List all event listeners |
+
+The service `settings` and the node `config` are never returned: settings often contain credentials (e.g. a database URI) that are not listed in `$secureSettings`.
 
 These tools are registered regardless of `exposeBrokerTools`, unless `exposeGenericTools` is `false`:
 

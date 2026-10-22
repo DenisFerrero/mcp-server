@@ -141,4 +141,12 @@ describe("Session timeout", () => {
 		await sleep(500);
 		expect(apiService.transports.size).toBe(1);
 	});
+
+	it("should not close sessions (nor run the idle check) when sessionTimeout is 0", async () => {
+		const mcpClient = await start({ sessionTimeout: 0 });
+		expect(apiService.mcpIdleTimer).toBeUndefined();
+		await closeMcpClient(mcpClient, { terminate: false });
+		await sleep(100);
+		expect(apiService.transports.size).toBe(1);
+	});
 });
