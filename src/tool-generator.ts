@@ -3,6 +3,7 @@ import Moleculer from "moleculer";
 import type { ActionSchema, ServiceBroker } from "moleculer";
 import type { McpServerMixinOptions } from "./types.js";
 import { convertActionParamsToZod } from "./schema-converter.js";
+import type { ToolConfig } from "./utils.js";
 import { getCallOptions, registerTool, toErrorResult, toTextResult } from "./utils.js";
 import "./moleculer-types.js";
 
@@ -11,6 +12,8 @@ const { match } = Moleculer.Utils;
 interface ActionEntry {
 	name: string;
 	action?: ActionSchema;
+	/** Number of endpoints (nodes) of the action */
+	count?: number;
 }
 
 function getRestMethod(rest: unknown): string | null {
@@ -146,18 +149,25 @@ export function withGatewayExclusions(
 	return { ...options, excludeActions: [...(options.excludeActions ?? []), ...patterns] };
 }
 
+/** A tool generated from an action: everything but the handler, which needs the server options */
+export interface ActionToolDefinition {
+	toolName: string;
+	actionName: string;
+	config: ToolConfig;
+	/** `$$root` params are wrapped in an object by the converter: unwrap them before the call */
+	isRootParams: boolean;
+}
+
 /**
- * Register a MCP tool for each discovered action.
- * Tools whose name is already registered on the server are skipped with a warning.
- * @returns The registered tools, so they can be removed when the registry changes.
+ * Generate the tool definitions of the discovered actions: names, descriptions, converted
+ * input schemas and annotations. They depend only on the registry, so they can be computed
+ * once and registered on many servers (the Zod schemas are immutable).
  */
-export function registerAutoDiscoveryTools(
-	server: McpServer,
+export function discoverActionTools(
 	broker: ServiceBroker,
 	options: McpServerMixinOptions
-): RegisteredTool[] {
-	const logger = broker.getLogger("MCP-AutoDiscovery");
-	const registered: RegisteredTool[] = [];
+): ActionToolDefinition[] {
+	const definitions: ActionToolDefinition[] = [];
 	const actions: ActionEntry[] = broker.registry.getActionList({
 		skipInternal: true,
 		withEndpoints: false
@@ -167,6 +177,8 @@ export function registerAutoDiscoveryTools(
 	const exposure = withGatewayExclusions(broker, options);
 
 	for (const actionEntry of actions) {
+		// The registry keeps the actions of the stopped services, without endpoints
+		if (actionEntry.count === 0) continue;
 		if (!isActionExposed(actionEntry, exposure)) continue;
 
 		const actionName = actionEntry.name;
@@ -193,33 +205,51 @@ export function registerAutoDiscoveryTools(
 			...(mcpMeta.annotations || {})
 		};
 
-		// `$$root` params are wrapped in an object by the converter, unwrap them before the call
-		const isRootParams = inputSchema.$$root !== undefined;
+		definitions.push({
+			toolName,
+			actionName,
+			config: {
+				title: mcpMeta.title || `Call ${actionName}`,
+				description,
+				inputSchema,
+				annotations
+			},
+			isRootParams: inputSchema.$$root !== undefined
+		});
+	}
 
+	return definitions;
+}
+
+/**
+ * Register a MCP tool for each action tool definition.
+ * Tools whose name is already registered on the server are skipped with a warning.
+ * @returns The registered tools, so they can be removed when the registry changes.
+ */
+export function registerActionTools(
+	server: McpServer,
+	broker: ServiceBroker,
+	options: McpServerMixinOptions,
+	definitions: ActionToolDefinition[]
+): RegisteredTool[] {
+	const logger = broker.getLogger("MCP-AutoDiscovery");
+	const registered: RegisteredTool[] = [];
+
+	for (const { toolName, actionName, config, isRootParams } of definitions) {
 		try {
-			const tool = registerTool(
-				server,
-				toolName,
-				{
-					title: mcpMeta.title || `Call ${actionName}`,
-					description,
-					inputSchema,
-					annotations
-				},
-				async (params, extra) => {
-					try {
-						const result = await broker.call(
-							actionName,
-							isRootParams ? params.$$root : params,
-							getCallOptions(options, extra)
-						);
-						return toTextResult(result, options.maxResultLength);
-					} catch (err: unknown) {
-						logger.error(`Error calling action ${actionName}:`, err);
-						return toErrorResult(err);
-					}
+			const tool = registerTool(server, toolName, { ...config }, async (params, extra) => {
+				try {
+					const result = await broker.call(
+						actionName,
+						isRootParams ? params.$$root : params,
+						getCallOptions(options, extra)
+					);
+					return toTextResult(result, options.maxResultLength);
+				} catch (err: unknown) {
+					logger.error(`Error calling action ${actionName}:`, err);
+					return toErrorResult(err);
 				}
-			);
+			});
 			registered.push(tool);
 		} catch (err) {
 			// e.g. two actions with the same `mcp.name`, or a name clashing with a broker tool
@@ -231,4 +261,17 @@ export function registerAutoDiscoveryTools(
 	}
 
 	return registered;
+}
+
+/**
+ * Register a MCP tool for each discovered action.
+ * Tools whose name is already registered on the server are skipped with a warning.
+ * @returns The registered tools, so they can be removed when the registry changes.
+ */
+export function registerAutoDiscoveryTools(
+	server: McpServer,
+	broker: ServiceBroker,
+	options: McpServerMixinOptions
+): RegisteredTool[] {
+	return registerActionTools(server, broker, options, discoverActionTools(broker, options));
 }

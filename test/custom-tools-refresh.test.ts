@@ -154,6 +154,35 @@ describe("Custom tools & dynamic refresh", () => {
 				await new Promise(resolve => setTimeout(resolve, 500));
 				const toolNames = (await listTools(mcpClient)).map((t: Tool) => t.name);
 				expect(toolNames).not.toContain("weather_forecast");
+
+				// The new sessions see the current actions anyway
+				const address = (apiService.server as Server).address() as AddressInfo;
+				const newClient = await createMcpClient(`http://localhost:${address.port}/mcp`);
+				try {
+					const newToolNames = (await listTools(newClient)).map((t: Tool) => t.name);
+					expect(newToolNames).toContain("weather_forecast");
+				} finally {
+					await closeMcpClient(newClient);
+				}
+			} finally {
+				await closeMcpClient(mcpClient);
+			}
+		});
+
+		it("should remove the tools of the stopped services", async () => {
+			const mcpClient = await start({ refreshDebounceTime: 50 });
+			try {
+				expect((await listTools(mcpClient)).map((t: Tool) => t.name)).toContain("math_add");
+
+				await broker.destroyService(broker.getLocalService("math")!);
+
+				await vi.waitFor(
+					async () => {
+						const toolNames = (await listTools(mcpClient)).map((t: Tool) => t.name);
+						expect(toolNames).not.toContain("math_add");
+					},
+					{ timeout: 3000, interval: 100 }
+				);
 			} finally {
 				await closeMcpClient(mcpClient);
 			}

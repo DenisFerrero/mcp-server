@@ -1,11 +1,18 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { Context, ServiceBroker } from "moleculer";
 import ApiGateway from "moleculer-web";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { McpServerMixin } from "../src/index.js";
+import { convertActionParamsToZod } from "../src/schema-converter.js";
 import { createMcpClient, closeMcpClient, callTool, listTools } from "./mcp-client.js";
 import type { Server } from "http";
 import type { AddressInfo } from "net";
+
+// Count the conversions of the action schemas
+vi.mock("../src/schema-converter.js", async importOriginal => {
+	const actual = await importOriginal<typeof import("../src/schema-converter.js")>();
+	return { ...actual, convertActionParamsToZod: vi.fn(actual.convertActionParamsToZod) };
+});
 
 describe("Stateless mode", () => {
 	let broker: ServiceBroker;
@@ -101,5 +108,52 @@ describe("Stateless mode", () => {
 			expect(res.status, method).toBe(405);
 			expect(res.headers.get("allow")).toBe("POST");
 		}
+	});
+
+	describe("Cache of the action tools", () => {
+		async function toolNames(): Promise<string[]> {
+			const res = await rpc("tools/list", {});
+			const text = await res.text();
+			// SSE response: the JSON-RPC message is in the `data:` line
+			const data = text.split("\n").find(line => line.startsWith("data: "));
+			const message = JSON.parse(data ? data.slice(6) : text);
+			return message.result.tools.map((t: Tool) => t.name);
+		}
+
+		it("should not convert the action schemas again on each request", async () => {
+			await start();
+			expect(await toolNames()).toContain("greeter_hello");
+			const conversions = vi.mocked(convertActionParamsToZod).mock.calls.length;
+
+			for (let i = 0; i < 3; i++) expect(await toolNames()).toContain("greeter_hello");
+			const mcpClient = await createMcpClient(url);
+			try {
+				await callTool(mcpClient, "greeter_hello", {});
+			} finally {
+				await closeMcpClient(mcpClient);
+			}
+
+			expect(vi.mocked(convertActionParamsToZod).mock.calls.length).toBe(conversions);
+		});
+
+		it("should show the actions of the services started or stopped later", async () => {
+			await start();
+			expect(await toolNames()).not.toContain("late_ping");
+
+			const late = broker.createService({
+				name: "late",
+				actions: { ping: { handler: () => "pong" } }
+			});
+			await broker.waitForServices("late");
+			// Without waiting for the refresh debounce of the sessions
+			await vi.waitFor(async () => expect(await toolNames()).toContain("late_ping"), {
+				timeout: 500
+			});
+
+			await broker.destroyService(late);
+			await vi.waitFor(async () => expect(await toolNames()).not.toContain("late_ping"), {
+				timeout: 500
+			});
+		});
 	});
 });

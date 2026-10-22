@@ -254,7 +254,7 @@ Each MCP session lives in the memory of the gateway process. Sessions are closed
 
 Requests with an unknown session ID (closed, expired or of a restarted gateway) get `404 Session not found`, as the MCP specification requires: the clients then start a new session.
 
-With several gateway instances behind a load balancer, either use sticky sessions or set `stateless: true`: every POST request gets a new MCP server, no session ID is issued and `GET`/`DELETE` answer `405`. In this mode server-to-client notifications (e.g. `tools/list_changed`) and stream resumability are not available.
+With several gateway instances behind a load balancer, either use sticky sessions or set `stateless: true`: every POST request gets a new MCP server, no session ID is issued and `GET`/`DELETE` answer `405`. In this mode server-to-client notifications (e.g. `tools/list_changed`) and stream resumability are not available. The tools of the actions are converted once and cached until the services change (`$services.changed`), so a new server per request costs little.
 
 ## Custom tools
 

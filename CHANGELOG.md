@@ -41,6 +41,7 @@ All notable changes to this project will be documented in this file.
 - **`callOptions` option** — Moleculer calling options (e.g. `timeout`) for the actions called by the tools.
 - **`maxResultLength` option** — Truncates long tool results with a note for the LLM.
 - **Stateless mode** — New `stateless` option for gateways running in several instances without sticky sessions.
+- **Cache of the action tools** — The converted schemas of the auto-discovered tools are kept until the next `$services.changed`, instead of being converted again for every new session, refreshed session and stateless request (stateless `tools/list` with 300 actions: from about 12 ms to 6 ms).
 - **Schema converter** — Full pipe syntax with options (`"string|min:3|max:10"`), `description` forwarded to the schema, `nullable`, `uuid`, `multi` (also as array shorthand), `properties` alias, string `length`/`empty` and array `min`/`max`/`length`/`empty`. String format flags (`alpha`, `numeric`, `alphanum`, `alphadash`, `hex`, `base64`, `singleLine`) and the `mac`, `currency`, `luhn`, `tuple`, `record`, `equal` types are converted too: their patterns are exported to the JSON Schema, so the LLM knows the expected format.
 
 ### Fixed issues
@@ -63,6 +64,7 @@ All notable changes to this project will be documented in this file.
 - **`moleculer_list_nodes` with `withServices: true` always failed** — The registry returns its internal service items, which are circular and can't be serialized.
 - **`sessionTimeout: 0`** closed every session at once and ran the idle check continuously: it now disables the timeout, as `false`.
 - **Authentication example** — It returned `null` for a missing token, which lets the request go on as anonymous.
+- **Tools of the stopped services** — The registry keeps the actions of a stopped service without endpoints, so they were still listed as tools (calling them failed with `ServiceNotFoundError`).
 - **Cross-platform npm scripts** — `dev`, `inspect` and `build` only worked on Windows or only on POSIX shells.
 
 ## 0.2.0 (2026-03-28)

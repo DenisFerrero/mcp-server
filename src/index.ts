@@ -24,9 +24,11 @@ import type { IncomingMessage } from "node:http";
 import { z } from "zod";
 import type { McpCustomTool, McpServerMixinOptions } from "./types.js";
 import type { RequestContextOptions } from "./utils.js";
+import type { ActionToolDefinition } from "./tool-generator.js";
 import {
+	discoverActionTools,
 	isActionExposed,
-	registerAutoDiscoveryTools,
+	registerActionTools,
 	withGatewayExclusions
 } from "./tool-generator.js";
 import { registerCustomTools } from "./custom-tools.js";
@@ -215,7 +217,11 @@ export function McpServerMixin(
 	// `forwardMeta`) are not merged with the default ones
 	const options: McpServerMixinOptions = _.defaults({}, mixinOptions, DEFAULT_OPTIONS);
 
-	function createServer(broker: ServiceBroker, options: McpServerMixinOptions): McpSession {
+	function createServer(
+		broker: ServiceBroker,
+		options: McpServerMixinOptions,
+		actionTools: ActionToolDefinition[]
+	): McpSession {
 		const logger = broker.getLogger("MCP");
 
 		logger.debug("Creating MCP server...");
@@ -541,7 +547,7 @@ export function McpServerMixin(
 
 		// Auto-discovery: register per-action tools (after the other tools, so a clashing
 		// action tool name is skipped instead of breaking the session)
-		const autoTools = registerAutoDiscoveryTools(server, broker, options);
+		const autoTools = registerActionTools(server, broker, options, actionTools);
 
 		return { server, autoTools, lastActivity: Date.now(), openStreams: 0 };
 	}
@@ -549,6 +555,9 @@ export function McpServerMixin(
 	return {
 		events: {
 			"$services.changed"() {
+				// Invalidated at once (also without the refresh debounce): new sessions and
+				// stateless requests always see the current actions
+				this.mcpActionTools = undefined;
 				this.debouncedRefreshMcpTools?.();
 			}
 		},
@@ -738,7 +747,11 @@ export function McpServerMixin(
 						pending = false;
 					};
 					try {
-						const session = createServer(this.broker, options);
+						const session = createServer(
+							this.broker,
+							options,
+							this.getMcpActionTools()
+						);
 						const eventStore = new BoundedEventStore(options.maxStoredEvents!);
 						const transport: StreamableHTTPServerTransport =
 							new StreamableHTTPServerTransport({
@@ -852,7 +865,11 @@ export function McpServerMixin(
 			 * response ends. No session is kept, so any gateway instance can serve any request.
 			 */
 			async handleStatelessMcpRequest(req: McpRequest, res: GatewayResponse) {
-				const { server } = createServer(this.broker, this.mcpOptions);
+				const { server } = createServer(
+					this.broker,
+					this.mcpOptions,
+					this.getMcpActionTools()
+				);
 				const transport = new StreamableHTTPServerTransport({
 					sessionIdGenerator: undefined
 				});
@@ -892,14 +909,25 @@ export function McpServerMixin(
 			 * The SDK notifies the clients with `notifications/tools/list_changed`.
 			 */
 			refreshMcpTools() {
+				const actionTools = this.getMcpActionTools();
 				for (const session of (this.mcpSessions as Map<string, McpSession>).values()) {
 					for (const tool of session.autoTools) tool.remove();
-					session.autoTools = registerAutoDiscoveryTools(
+					session.autoTools = registerActionTools(
 						session.server,
 						this.broker,
-						this.mcpOptions
+						this.mcpOptions,
+						actionTools
 					);
 				}
+			},
+
+			/**
+			 * The tools of the discovered actions, cached until the next `$services.changed`:
+			 * converting the action schemas is the slowest part of creating a MCP server, and
+			 * stateless mode creates one for each request.
+			 */
+			getMcpActionTools(): ActionToolDefinition[] {
+				return (this.mcpActionTools ??= discoverActionTools(this.broker, this.mcpOptions));
 			},
 
 			/** Close all the open MCP sessions (their transports and SSE streams) */
@@ -1039,6 +1067,7 @@ export function McpServerMixin(
 			clearInterval(this.mcpIdleTimer);
 
 			this.debouncedRefreshMcpTools?.cancel();
+			this.mcpActionTools = undefined;
 
 			await this.closeMcpSessions();
 
