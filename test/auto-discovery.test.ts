@@ -836,5 +836,37 @@ describe("Auto-discovery Integration Tests", () => {
 				await closeMcpClient(mcpClient);
 			}
 		});
+
+		it("should use action.title as tool title", async () => {
+			const mcpClient = await startWith({
+				forecast: { title: "Weather forecast", handler: () => "sunny" }
+			});
+			try {
+				const tool = (await listTools(mcpClient)).find(
+					(t: Tool) => t.name === "weather_forecast"
+				);
+				expect(tool?.title).toBe("Weather forecast");
+			} finally {
+				await closeMcpClient(mcpClient);
+			}
+		});
+
+		it("should use mcp.title over action.title", async () => {
+			const mcpClient = await startWith({
+				forecast: {
+					title: "Basic title",
+					mcp: { title: "MCP specific title" },
+					handler: () => "sunny"
+				}
+			});
+			try {
+				const tool = (await listTools(mcpClient)).find(
+					(t: Tool) => t.name === "weather_forecast"
+				);
+				expect(tool?.title).toBe("MCP specific title");
+			} finally {
+				await closeMcpClient(mcpClient);
+			}
+		});
 	});
 });

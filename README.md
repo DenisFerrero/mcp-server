@@ -315,13 +315,14 @@ Errors (of the actions and of the custom tool handlers) are returned as tool err
 
 ## Action Description & MCP Metadata
 
-### Description field
+### Description and title fields
 
-Add a `description` field to your actions. It will be used as the MCP tool description, helping AI assistants understand what the tool does:
+Add a `description` field to your actions. It will be used as the MCP tool description, helping AI assistants understand what the tool does. The `title` field is used as the MCP tool title, a short human-readable name shown by the clients:
 
 ```javascript
 actions: {
   forecast: {
+    title: "Weather forecast",
     description: "Get weather forecast for a city by name",
     params: { city: "string" },
     handler(ctx) { /* ... */ }
@@ -329,7 +330,7 @@ actions: {
 }
 ```
 
-If no description is provided, a default is generated: `"Call the weather.forecast Moleculer action"`.
+If no description is provided, a default is generated: `"Call the weather.forecast Moleculer action"`. If no title is provided, the default is `"Call weather.forecast"`.
 
 ### MCP metadata
 

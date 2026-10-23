@@ -5,6 +5,9 @@ declare module "moleculer" {
 		/** Human-readable description of this action. Used as the MCP tool description. */
 		description?: string;
 
+		/** Short human-readable title of this action. Used as the MCP tool title. */
+		title?: string;
+
 		/**
 		 * MCP metadata for this action.
 		 * - `false` — exclude from MCP tools

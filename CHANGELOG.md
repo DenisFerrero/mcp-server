@@ -31,6 +31,7 @@ All notable changes to this project will be documented in this file.
 - **Custom tools** — New `tools` option to declare tools with Zod `input`/`output` schemas, annotations and a handler (action name or function). With `output` the result is also returned as `structuredContent`.
 - **Dynamic tools refresh** — On `$services.changed` the auto-discovered tools of every open session are regenerated and clients are notified with `tools/list_changed`. Debounced by the new `refreshDebounceTime` option (default `1000`, `false` to disable).
 - **`mcp.title`** — Custom title for auto-discovered tools.
+- **Action `title`** — The `title` of the action (next to `description`) is the tool title when `mcp.title` is not set.
 - **Authenticated user forwarding** — The `forwardMeta` fields (default `["user"]`) of the HTTP request `ctx.meta`, e.g. the user set by the route `authenticate` method, are forwarded as `meta` to the actions and events called by the tools.
 - **`exposeGenericTools` option** — Hides `moleculer_call_action` and `moleculer_emit_event`.
 - **Idle sessions cleanup** — New `sessionTimeout` option (default 30 minutes, `false` to disable).

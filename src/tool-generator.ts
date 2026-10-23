@@ -239,7 +239,7 @@ export function discoverActionTools(
 			toolName,
 			actionName,
 			config: {
-				title: mcpMeta.title || `Call ${actionName}`,
+				title: mcpMeta.title || actionDef.title || `Call ${actionName}`,
 				description,
 				inputSchema,
 				annotations
