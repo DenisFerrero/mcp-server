@@ -398,6 +398,31 @@ actions: {
 }
 ```
 
+The explicit annotations are merged with the detected ones: set only the hints that differ.
+
+### Choosing the annotations
+
+The auto-detection only knows the REST method or the action name, not what the handler does: check the actions whose behavior doesn't match their method (e.g. a `POST /search` that only reads, a `GET` that writes a log record used by the business logic, an `update` that increments a counter). Ask these questions, in order:
+
+1. **`readOnlyHint` — Does the action change anything?** `true` only if it never modifies its environment: no database writes, no emitted events or called actions that change data, no messages sent. Logs, metrics and caches don't count. When it's `true`, `destructiveHint` and `idempotentHint` are meaningless.
+2. **`destructiveHint` — Can a call lose or overwrite existing data?** `true` if it deletes, overwrites or replaces existing data, or does something that can't be undone (e.g. cancelling an order, revoking an access). `false` if it only adds data (e.g. creating a record, appending a comment) or changes it in a way that is easy to restore.
+3. **`idempotentHint` — Does a second call with the same arguments change something more?** `true` if repeating the call has no additional effect (e.g. `set` a field to a value, `remove` by ID: the second call fails or does nothing). `false` if every call adds or increments something (e.g. `create` generates a new ID, `send` sends another email, `increment` adds again). The response can differ (e.g. the second `remove` returns a `NotFound` error): only the effect counts.
+
+| Action | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
+| --- | --- | --- | --- |
+| `products.find`, `products.get`, `POST /search` | `true` | — | — |
+| `products.create` | `false` | `false` | `false` |
+| `products.update` (sets the given fields) | `false` | `true` | `true` |
+| `products.update` (`stock: { $inc: 1 }`) | `false` | `true` | `false` |
+| `products.remove`, `orders.cancel` | `false` | `true` | `true` |
+| `mail.send` (also `openWorldHint: true`) | `false` | `false` | `false` |
+
+`openWorldHint` (always detected as `false`) tells whether the action reaches entities outside the system, e.g. sending emails or calling a third-party API: set it to `true` for these actions.
+
+The clients can use the annotations to ask for a confirmation before a destructive tool, run the read-only ones without asking, or retry the idempotent ones after an error. When in doubt choose the safer value (`readOnlyHint: false`, `destructiveHint: true`, `idempotentHint: false`): a wrong "safe" hint can make a client call or retry a tool without asking. The annotations are only hints, not a security mechanism: protect the actions with authentication, `mcp: false` or `excludeActions`.
+
+The custom tools (the `tools` option) have no auto-detected annotations: without `annotations`, the clients assume the MCP defaults (`readOnlyHint: false`, `destructiveHint: true`, `idempotentHint: false`, `openWorldHint: true`).
+
 ## Schema Conversion
 
 The mixin automatically converts fastest-validator parameter schemas to Zod schemas for MCP tool input validation. The following mappings are supported:
