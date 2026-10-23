@@ -69,6 +69,7 @@ All notable changes to this project will be documented in this file.
 - **Authentication example** — It returned `null` for a missing token, which lets the request go on as anonymous.
 - **Tools of the stopped services** — The registry keeps the actions of a stopped service without endpoints, so they were still listed as tools (calling them failed with `ServiceNotFoundError`).
 - **Installation from git** — `npm install git+https://...` installed the package without `dist/`: the build ran only on `prepack`, which npm doesn't run for git dependencies. It runs on `prepare` now, and CI installs the package from git.
+- **Typings of `mcp.annotations`** — It was a `Record<string, boolean>`, without the hint names: it is the SDK `ToolAnnotations` type now (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`, `title`), as for the custom tools.
 - **Cross-platform npm scripts** — `dev`, `inspect` and `build` only worked on Windows or only on POSIX shells.
 
 ## 0.2.0 (2026-03-28)

@@ -1,4 +1,5 @@
 import "moleculer";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 
 declare module "moleculer" {
 	interface ActionSchema {
@@ -21,7 +22,8 @@ declare module "moleculer" {
 					name?: string;
 					title?: string;
 					description?: string;
-					annotations?: Record<string, boolean>;
+					/** Merged with the annotations detected from the REST method or the action name */
+					annotations?: ToolAnnotations;
 			  };
 	}
 }
