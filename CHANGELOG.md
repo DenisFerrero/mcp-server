@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 0.3.0-rc.3 (2026-10-23)
+## 0.3.0 (unreleased)
 
 ### Breaking changes
 
